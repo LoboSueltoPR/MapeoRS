@@ -260,6 +260,9 @@ main { display:flex; flex:1; overflow:hidden; }
   <button class="tbtn" id="btn-export" title="Exportar como JSON">📤 Exportar</button>
   <button class="tbtn" id="btn-import" title="Importar JSON">📥 Importar</button>
   <div class="sep"></div>
+  <button class="tbtn" id="btn-sync" style="display:none" title="Guardar datos en GitHub para sincronizar con otros dispositivos">☁️ Sync</button>
+  <button class="tbtn" id="btn-sync-setup" title="Configurar sincronización con GitHub">⚙️ Sync</button>
+  <div class="sep"></div>
   <button class="tbtn" id="btn-help" title="Atajos de teclado">❓ Ayuda</button>
 
   <input type="file" id="file-plan" accept="image/*" style="display:none">
@@ -488,6 +491,43 @@ main { display:flex; flex:1; overflow:hidden; }
   </div>
 </div>
 
+<!-- ── SYNC MODAL ───────────────────────────────────────── -->
+<div class="modal-bg" id="sync-modal">
+  <div class="modal" style="width:440px">
+    <h2>☁️ Sincronización con GitHub</h2>
+    <p style="font-size:.82rem;color:var(--muted);margin-bottom:14px;line-height:1.5">
+      Tus equipos y cables se guardan como <code style="background:var(--bg);padding:1px 5px;border-radius:3px">data.json</code>
+      en el repositorio. Al abrir la app en el teléfono, los carga automáticamente.
+    </p>
+    <div class="fgroup">
+      <label>Token de GitHub (Personal Access Token)</label>
+      <input type="password" id="gh-token-input" placeholder="github_pat_xxxxxxxxxxxx…" autocomplete="off">
+    </div>
+    <div style="background:var(--bg);border-radius:6px;padding:12px 14px;font-size:.75rem;color:var(--muted);line-height:1.6;margin-bottom:4px">
+      <b style="color:var(--text)">Cómo crear el token (una sola vez):</b><br>
+      1. GitHub → tu foto → <b>Settings</b><br>
+      2. Sidebar izquierdo → <b>Developer settings</b> → <b>Personal access tokens</b> → <b>Fine-grained tokens</b><br>
+      3. <b>Generate new token</b> → elegí el repo <b>MapeoRS</b><br>
+      4. En permisos: <b>Repository permissions → Contents → Read and write</b><br>
+      5. Copiá el token y pegalo acá arriba
+    </div>
+    <div class="modal-foot">
+      <button class="mbtn cancel" onclick="closeSyncModal()">Cancelar</button>
+      <button class="mbtn save" onclick="applyToken()">💾 Guardar y sincronizar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── GITHUB BANNER (cuando hay datos nuevos en GitHub) ── -->
+<div id="gh-banner" style="display:none;position:fixed;top:62px;left:50%;transform:translateX(-50%);
+    background:var(--surface);border:1px solid var(--accent);border-radius:8px;
+    padding:9px 16px;z-index:300;font-size:.8rem;align-items:center;gap:12px;
+    white-space:nowrap;box-shadow:0 4px 20px rgba(0,0,0,.4)">
+  ☁️ Datos sincronizados en GitHub — <span id="gh-banner-date" style="color:var(--muted)"></span>
+  <button class="tbtn" style="padding:4px 12px;font-size:.75rem" onclick="applyGHData()">⬇️ Cargar</button>
+  <button style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:1rem;line-height:1" onclick="document.getElementById('gh-banner').style.display='none'">✕</button>
+</div>
+
 <!-- ══════════════════════════════════════════════════════ -->
 <script>
 // ── CONFIG ────────────────────────────────────────────────
@@ -574,18 +614,148 @@ async function idbGet(key) {
   });
 }
 
+// ── GITHUB SYNC ───────────────────────────────────────────
+const GH_OWNER = 'LoboSueltoPR';
+const GH_REPO  = 'MapeoRS';
+const GH_FILE  = 'data.json';
+const GH_RAW   = `https://raw.githubusercontent.com/${GH_OWNER}/${GH_REPO}/main/${GH_FILE}`;
+const GH_API   = `https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/${GH_FILE}`;
+
+let ghToken = localStorage.getItem('mapeoRS_ghToken') || '';
+let _pendingGHData = null;
+
+function updateSyncUI() {
+  const has = !!ghToken;
+  document.getElementById('btn-sync').style.display = has ? '' : 'none';
+  document.getElementById('btn-sync-setup').textContent = has ? '⚙️ Sync ✓' : '⚙️ Sync';
+}
+
+function openSyncModal() {
+  document.getElementById('gh-token-input').value = ghToken;
+  document.getElementById('sync-modal').classList.add('open');
+}
+function closeSyncModal() {
+  document.getElementById('sync-modal').classList.remove('open');
+}
+function applyToken() {
+  const t = document.getElementById('gh-token-input').value.trim();
+  ghToken = t;
+  if (t) localStorage.setItem('mapeoRS_ghToken', t);
+  else   localStorage.removeItem('mapeoRS_ghToken');
+  closeSyncModal();
+  updateSyncUI();
+  if (t) syncToGitHub();
+}
+
+async function syncToGitHub() {
+  if (!ghToken) { openSyncModal(); return; }
+
+  const btn = document.getElementById('btn-sync');
+  const orig = btn.textContent;
+  btn.textContent = '⏳ Guardando…';
+  btn.disabled = true;
+
+  try {
+    const payload = JSON.stringify({
+      version: '1.1',
+      syncedAt: new Date().toISOString(),
+      devices: S.devices,
+      cables:  S.cables,
+      seq:     S.seq
+    }, null, 2);
+
+    // btoa con soporte unicode
+    const b64 = btoa(unescape(encodeURIComponent(payload)));
+
+    // Obtener SHA actual del archivo (si ya existe)
+    let sha = null;
+    const getR = await fetch(GH_API, {
+      headers: { 'Authorization': `Bearer ${ghToken}`, 'Accept': 'application/vnd.github.v3+json' }
+    });
+    if (getR.ok) { sha = (await getR.json()).sha; }
+
+    // Commit via API
+    const putR = await fetch(GH_API, {
+      method: 'PUT',
+      headers: {
+        'Authorization': `Bearer ${ghToken}`,
+        'Accept': 'application/vnd.github.v3+json',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        message: `sync: ${new Date().toLocaleString('es-AR')}`,
+        content: b64,
+        ...(sha ? { sha } : {})
+      })
+    });
+
+    if (!putR.ok) {
+      const err = await putR.json();
+      throw new Error(err.message || `HTTP ${putR.status}`);
+    }
+
+    btn.textContent = '✅ Sincronizado';
+    setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 2500);
+
+  } catch(e) {
+    btn.textContent = orig;
+    btn.disabled = false;
+    alert('Error al sincronizar con GitHub:\n' + e.message +
+          '\n\nVerificá que el token sea válido y tenga permisos de escritura en el repo.');
+  }
+}
+
+async function checkGitHub() {
+  try {
+    const resp = await fetch(GH_RAW + '?t=' + Date.now());
+    if (!resp.ok) return;
+    const data = await resp.json();
+    if (!data || !Array.isArray(data.devices)) return;
+
+    const noLocal = S.devices.length === 0 && S.cables.length === 0;
+    if (noLocal) {
+      // Sin datos locales → cargar de GitHub silenciosamente
+      S.devices = data.devices || [];
+      S.cables  = data.cables  || [];
+      S.seq     = data.seq     || 1;
+      render(); saveStorage();
+    } else {
+      // Hay datos locales → mostrar banner para que el usuario decida
+      _pendingGHData = data;
+      const fecha = data.syncedAt
+        ? new Date(data.syncedAt).toLocaleString('es-AR')
+        : 'fecha desconocida';
+      document.getElementById('gh-banner-date').textContent = fecha;
+      document.getElementById('gh-banner').style.display = 'flex';
+    }
+  } catch(e) { /* sin conexión o sin data.json todavía */ }
+}
+
+function applyGHData() {
+  if (!_pendingGHData) return;
+  S.devices = _pendingGHData.devices || [];
+  S.cables  = _pendingGHData.cables  || [];
+  S.seq     = _pendingGHData.seq     || 1;
+  _pendingGHData = null;
+  document.getElementById('gh-banner').style.display = 'none';
+  render(); saveStorage();
+}
+
 // ── BOOT ──────────────────────────────────────────────────
 (async function boot() {
   buildTypeSelect();
   buildLegend();
   loadStorage();
   bindEvents();
+  updateSyncUI();
   render();
   // Cargar plano guardado desde IndexedDB
   try {
     const saved = await idbGet('plan');
     if (saved) applyPlan(saved, false);
   } catch(e) {}
+  // Verificar datos en GitHub
+  checkGitHub();
 })();
 
 // ── STORAGE (solo equipos y cables, sin imagen) ───────────
@@ -755,6 +925,8 @@ function bindEvents() {
   document.getElementById('btn-import').onclick   = () => document.getElementById('file-import-json').click();
   document.getElementById('file-import-json').onchange = importJSON;
   document.getElementById('btn-help').onclick     = () => document.getElementById('help-modal').classList.add('open');
+  document.getElementById('btn-sync').onclick      = syncToGitHub;
+  document.getElementById('btn-sync-setup').onclick = openSyncModal;
 
   // Search
   document.getElementById('dev-search').oninput = renderDevList;
