@@ -611,6 +611,8 @@ let S = {
   ctxId: null
 };
 
+let tempLine = null;   // cable temporal mientras se traza
+
 // ── DOM REFS ──────────────────────────────────────────────
 const mapWrap    = document.getElementById('map-wrap');
 const mapVp      = document.getElementById('map-vp');
@@ -1175,7 +1177,6 @@ function deleteCable(id) {
 }
 
 // ── TEMP CABLE ───────────────────────────────────────────
-let tempLine = null;
 function renderTempCable(pos) {
   if (!S.cabStart) return;
   const d = S.devices.find(x => x.id === S.cabStart);
