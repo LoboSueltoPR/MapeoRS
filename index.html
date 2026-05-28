@@ -243,13 +243,57 @@ main { display:flex; flex:1; overflow:hidden; }
 
 /* Cable select highlight */
 .cable-line:hover { stroke-width:4 !important; cursor:pointer; }
+
+/* ── MOBILE / RESPONSIVE ─────────────────────────── */
+.mobile-only { display:none; }
+#mobile-backdrop { display:none; }
+
+@media (max-width:768px) {
+  body { height:100dvh; }
+
+  .mobile-only { display:flex !important; }
+  .sep { display:none; }
+
+  /* Header en filas que se acomodan */
+  header { height:auto; flex-wrap:wrap; padding:6px 8px; gap:5px; }
+  header h1 { width:100%; margin:0 0 2px; font-size:.82rem; text-align:center; }
+  .tbtn { padding:7px 10px; font-size:.72rem; }
+
+  /* Sidebars como paneles deslizantes */
+  .sidebar {
+    position:fixed; top:0; bottom:0; left:0; z-index:400;
+    width:82%; max-width:300px;
+    transform:translateX(-100%); transition:transform .25s ease;
+    box-shadow:0 0 30px rgba(0,0,0,.6);
+  }
+  .sidebar.right { left:auto; right:0; width:86%; max-width:320px; transform:translateX(100%); }
+  .sidebar.open { transform:translateX(0); }
+
+  #mobile-backdrop {
+    position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:350;
+  }
+  #mobile-backdrop.show { display:block; }
+
+  /* Barra de stats: ocultar texto de teclas y compactar */
+  .stats { gap:12px; font-size:.66rem; padding:0 10px; }
+  .stats span:last-child { display:none; }
+
+  /* Modales a pantalla angosta */
+  .modal { width:92vw; padding:18px; }
+  .modal-row { flex-direction:column; gap:0; }
+
+  /* Markers un poco más grandes para el dedo */
+  .dmarker .ico { width:38px; height:38px; font-size:19px; }
+}
 </style>
 </head>
 <body>
 
 <!-- ── HEADER ──────────────────────────────────────────── -->
 <header>
+  <button class="tbtn mobile-only" id="btn-toggle-left" title="Equipos">☰</button>
   <h1>🌐 MapeoRS — Infraestructura de Red</h1>
+  <button class="tbtn mobile-only" id="btn-toggle-right" title="Detalles">ℹ️</button>
 
   <label class="tbtn" for="file-plan" title="Cargar imagen del plano" style="cursor:pointer">📁 Cargar Plano</label>
   <div class="sep"></div>
@@ -328,6 +372,9 @@ main { display:flex; flex:1; overflow:hidden; }
   </div>
 
 </main>
+
+<!-- Backdrop para paneles en mobile -->
+<div id="mobile-backdrop"></div>
 
 <!-- Stats bar -->
 <div class="stats">
@@ -518,16 +565,6 @@ main { display:flex; flex:1; overflow:hidden; }
   </div>
 </div>
 
-<!-- ── GITHUB BANNER (cuando hay datos nuevos en GitHub) ── -->
-<div id="gh-banner" style="display:none;position:fixed;top:62px;left:50%;transform:translateX(-50%);
-    background:var(--surface);border:1px solid var(--accent);border-radius:8px;
-    padding:9px 16px;z-index:300;font-size:.8rem;align-items:center;gap:12px;
-    white-space:nowrap;box-shadow:0 4px 20px rgba(0,0,0,.4)">
-  ☁️ Datos sincronizados en GitHub — <span id="gh-banner-date" style="color:var(--muted)"></span>
-  <button class="tbtn" style="padding:4px 12px;font-size:.75rem" onclick="applyGHData()">⬇️ Cargar</button>
-  <button style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:1rem;line-height:1" onclick="document.getElementById('gh-banner').style.display='none'">✕</button>
-</div>
-
 <!-- ══════════════════════════════════════════════════════ -->
 <script>
 // ── CONFIG ────────────────────────────────────────────────
@@ -618,11 +655,11 @@ async function idbGet(key) {
 const GH_OWNER = 'LoboSueltoPR';
 const GH_REPO  = 'MapeoRS';
 const GH_FILE  = 'data.json';
+const PLAN_IMG = 'plano.png';   // imagen fija del plano (debe estar en el repo)
 const GH_RAW   = `https://raw.githubusercontent.com/${GH_OWNER}/${GH_REPO}/main/${GH_FILE}`;
 const GH_API   = `https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/${GH_FILE}`;
 
 let ghToken = localStorage.getItem('mapeoRS_ghToken') || '';
-let _pendingGHData = null;
 
 function updateSyncUI() {
   const has = !!ghToken;
@@ -712,33 +749,12 @@ async function checkGitHub() {
     const data = await resp.json();
     if (!data || !Array.isArray(data.devices)) return;
 
-    const noLocal = S.devices.length === 0 && S.cables.length === 0;
-    if (noLocal) {
-      // Sin datos locales → cargar de GitHub silenciosamente
-      S.devices = data.devices || [];
-      S.cables  = data.cables  || [];
-      S.seq     = data.seq     || 1;
-      render(); saveStorage();
-    } else {
-      // Hay datos locales → mostrar banner para que el usuario decida
-      _pendingGHData = data;
-      const fecha = data.syncedAt
-        ? new Date(data.syncedAt).toLocaleString('es-AR')
-        : 'fecha desconocida';
-      document.getElementById('gh-banner-date').textContent = fecha;
-      document.getElementById('gh-banner').style.display = 'flex';
-    }
+    // GitHub es la fuente de verdad: al abrir siempre sobrescribe lo local
+    S.devices = data.devices || [];
+    S.cables  = data.cables  || [];
+    S.seq     = data.seq     || 1;
+    render(); saveStorage();
   } catch(e) { /* sin conexión o sin data.json todavía */ }
-}
-
-function applyGHData() {
-  if (!_pendingGHData) return;
-  S.devices = _pendingGHData.devices || [];
-  S.cables  = _pendingGHData.cables  || [];
-  S.seq     = _pendingGHData.seq     || 1;
-  _pendingGHData = null;
-  document.getElementById('gh-banner').style.display = 'none';
-  render(); saveStorage();
 }
 
 // ── BOOT ──────────────────────────────────────────────────
@@ -749,14 +765,34 @@ function applyGHData() {
   bindEvents();
   updateSyncUI();
   render();
-  // Cargar plano guardado desde IndexedDB
-  try {
-    const saved = await idbGet('plan');
-    if (saved) applyPlan(saved, false);
-  } catch(e) {}
+  // Cargar el plano fijo del repo; si no existe, usar el guardado en IndexedDB
+  loadFixedPlan();
   // Verificar datos en GitHub
   checkGitHub();
 })();
+
+async function loadFixedPlan() {
+  floorImg.onload = () => {
+    S.planW = floorImg.naturalWidth;
+    S.planH = floorImg.naturalHeight;
+    floorImg.style.display = 'block';
+    noPlanMsg.style.display = 'none';
+    cabSvg.style.width    = S.planW + 'px';
+    cabSvg.style.height   = S.planH + 'px';
+    devLayer.style.width  = S.planW + 'px';
+    devLayer.style.height = S.planH + 'px';
+    fitPlan();
+    render();
+  };
+  floorImg.onerror = async () => {
+    // El plano fijo aún no está en el repo → respaldo local
+    try {
+      const saved = await idbGet('plan');
+      if (saved) applyPlan(saved, true);
+    } catch(e) {}
+  };
+  floorImg.src = PLAN_IMG + '?t=' + Date.now();
+}
 
 // ── STORAGE (solo equipos y cables, sin imagen) ───────────
 function saveStorage() {
@@ -889,6 +925,43 @@ function bindEvents() {
   });
   mapWrap.addEventListener('contextmenu', e => e.preventDefault());
 
+  // Touch: un dedo = pan, dos dedos = pinch zoom
+  let touch = null;
+  const tdist = (a, b) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+  mapWrap.addEventListener('touchstart', e => {
+    if (e.touches.length === 1) {
+      const t = e.touches[0];
+      touch = { mode:'pan', sx:t.clientX, sy:t.clientY, px:S.pan.x, py:S.pan.y };
+    } else if (e.touches.length === 2) {
+      touch = { mode:'pinch', d:tdist(e.touches[0], e.touches[1]) };
+    }
+  }, { passive:true });
+  mapWrap.addEventListener('touchmove', e => {
+    if (!touch) return;
+    if (touch.mode === 'pan' && e.touches.length === 1) {
+      e.preventDefault();
+      const t = e.touches[0];
+      S.pan.x = touch.px + (t.clientX - touch.sx);
+      S.pan.y = touch.py + (t.clientY - touch.sy);
+      applyTransform();
+    } else if (touch.mode === 'pinch' && e.touches.length === 2) {
+      e.preventDefault();
+      const nd = tdist(e.touches[0], e.touches[1]);
+      const r = mapWrap.getBoundingClientRect();
+      const cx = (e.touches[0].clientX + e.touches[1].clientX) / 2 - r.left;
+      const cy = (e.touches[0].clientY + e.touches[1].clientY) / 2 - r.top;
+      if (touch.d) zoomAt(cx, cy, nd / touch.d);
+      touch.d = nd;
+    }
+  }, { passive:false });
+  mapWrap.addEventListener('touchend', e => {
+    if (e.touches.length === 0) touch = null;
+    else if (e.touches.length === 1) {
+      const t = e.touches[0];
+      touch = { mode:'pan', sx:t.clientX, sy:t.clientY, px:S.pan.x, py:S.pan.y };
+    }
+  }, { passive:true });
+
   // Click on map (add device)
   mapWrap.addEventListener('click', e => {
     if (S.panning) return;
@@ -927,6 +1000,11 @@ function bindEvents() {
   document.getElementById('btn-help').onclick     = () => document.getElementById('help-modal').classList.add('open');
   document.getElementById('btn-sync').onclick      = syncToGitHub;
   document.getElementById('btn-sync-setup').onclick = openSyncModal;
+
+  // Paneles deslizantes (mobile)
+  document.getElementById('btn-toggle-left').onclick  = () => togglePanel('left');
+  document.getElementById('btn-toggle-right').onclick = () => togglePanel('right');
+  document.getElementById('mobile-backdrop').onclick  = closePanels;
 
   // Search
   document.getElementById('dev-search').oninput = renderDevList;
@@ -1275,6 +1353,7 @@ function select(id) {
   renderDevMarkers();
   renderDevList();
   renderDetail(id);
+  if (isMobile() && id) openPanel('right');
 }
 
 function renderDetail(id) {
@@ -1424,6 +1503,25 @@ function panTo(d) {
 
 // ── CTX MENU ──────────────────────────────────────────────
 function closeCtx() { ctxMenu.classList.remove('open'); }
+
+// ── PANELES MOBILE ────────────────────────────────────────
+const isMobile = () => window.matchMedia('(max-width:768px)').matches;
+const _backdrop = document.getElementById('mobile-backdrop');
+function closePanels() {
+  document.getElementById('sidebar-left').classList.remove('open');
+  document.getElementById('sidebar-right').classList.remove('open');
+  _backdrop.classList.remove('show');
+}
+function openPanel(side) {
+  closePanels();
+  document.getElementById('sidebar-' + side).classList.add('open');
+  _backdrop.classList.add('show');
+}
+function togglePanel(side) {
+  const el = document.getElementById('sidebar-' + side);
+  if (el.classList.contains('open')) closePanels();
+  else openPanel(side);
+}
 
 // ── EXPORT / IMPORT ───────────────────────────────────────
 function exportJSON() {
