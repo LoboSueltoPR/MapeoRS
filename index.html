@@ -1,0 +1,1307 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MapeoRS — Red de Infraestructura</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+
+:root {
+  --bg: #0f1117;
+  --surface: #1a1d27;
+  --surface2: #22263a;
+  --border: #2d3250;
+  --accent: #4f8ef7;
+  --danger: #ef4444;
+  --success: #22c55e;
+  --warn: #f59e0b;
+  --text: #e2e8f0;
+  --muted: #64748b;
+}
+
+body { font-family:'Segoe UI',system-ui,sans-serif; background:var(--bg); color:var(--text); height:100vh; display:flex; flex-direction:column; overflow:hidden; }
+
+/* ── HEADER ─────────────────────────────────── */
+header {
+  background:var(--surface); border-bottom:1px solid var(--border);
+  padding:0 16px; height:52px; display:flex; align-items:center; gap:10px;
+  flex-shrink:0; z-index:200;
+}
+header h1 { font-size:.95rem; font-weight:700; color:var(--accent); margin-right:auto; letter-spacing:.5px; }
+
+.tbtn {
+  padding:6px 13px; border:1px solid var(--border); background:var(--surface2);
+  color:var(--text); border-radius:6px; cursor:pointer; font-size:.78rem;
+  transition:all .15s; white-space:nowrap; display:flex; align-items:center; gap:5px;
+}
+.tbtn:hover { background:var(--border); border-color:var(--accent); }
+.tbtn.active { background:var(--accent); border-color:var(--accent); color:#fff; }
+.tbtn.danger { border-color:var(--danger); }
+.tbtn.danger:hover { background:var(--danger); color:#fff; }
+.tbtn.success:hover { background:var(--success); color:#fff; border-color:var(--success); }
+.sep { width:1px; height:28px; background:var(--border); }
+
+/* ── LAYOUT ──────────────────────────────────── */
+main { display:flex; flex:1; overflow:hidden; }
+
+/* ── LEFT SIDEBAR ────────────────────────────── */
+.sidebar {
+  width:220px; background:var(--surface); border-right:1px solid var(--border);
+  display:flex; flex-direction:column; overflow:hidden; flex-shrink:0;
+}
+.sidebar.right { border-right:none; border-left:1px solid var(--border); width:260px; }
+.sb-head { padding:10px 12px 8px; font-size:.72rem; font-weight:700; letter-spacing:1px; color:var(--muted); text-transform:uppercase; border-bottom:1px solid var(--border); flex-shrink:0; }
+
+.search-box { padding:8px; border-bottom:1px solid var(--border); flex-shrink:0; }
+.search-box input { width:100%; padding:5px 9px; background:var(--bg); border:1px solid var(--border); border-radius:5px; color:var(--text); font-size:.78rem; }
+.search-box input:focus { outline:none; border-color:var(--accent); }
+
+.device-list { flex:1; overflow-y:auto; padding:4px; }
+.dev-item {
+  padding:7px 9px; margin:2px 0; border-radius:5px; cursor:pointer;
+  border:1px solid transparent; font-size:.78rem; display:flex; align-items:center; gap:8px;
+  transition:all .1s;
+}
+.dev-item:hover { background:var(--surface2); }
+.dev-item.selected { border-color:var(--accent); background:#1e2a3d; }
+.dev-dot { width:10px; height:10px; border-radius:50%; flex-shrink:0; }
+.dev-info { min-width:0; }
+.dev-info b { display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.dev-info small { color:var(--muted); font-size:.7rem; }
+
+/* Legend */
+.legend { padding:10px 12px; border-top:1px solid var(--border); flex-shrink:0; }
+.legend h4 { font-size:.68rem; color:var(--muted); text-transform:uppercase; letter-spacing:.8px; margin-bottom:6px; }
+.leg-item { display:flex; align-items:center; gap:7px; font-size:.72rem; margin-bottom:3px; color:var(--muted); }
+
+/* Cable list */
+.cable-section { border-top:1px solid var(--border); }
+.cable-section .sb-head { cursor:pointer; }
+.cable-section .sb-head:hover { color:var(--text); }
+
+/* ── MAP ─────────────────────────────────────── */
+.map-wrap { flex:1; overflow:hidden; position:relative; background:var(--bg); cursor:default; }
+
+.map-vp { position:absolute; top:0; left:0; transform-origin:0 0; }
+
+.floor-img { display:block; user-select:none; -webkit-user-drag:none; }
+
+.cables-svg { position:absolute; top:0; left:0; overflow:visible; }
+
+.dev-layer { position:absolute; top:0; left:0; }
+
+/* Device markers */
+.dmarker {
+  position:absolute; transform:translate(-50%,-50%); cursor:pointer;
+  display:flex; flex-direction:column; align-items:center; z-index:10;
+  user-select:none;
+}
+.dmarker .ico {
+  width:34px; height:34px; border-radius:50%;
+  display:flex; align-items:center; justify-content:center;
+  font-size:17px; border:2px solid rgba(255,255,255,.15);
+  box-shadow:0 2px 10px rgba(0,0,0,.6); transition:all .15s;
+}
+.dmarker:hover .ico { transform:scale(1.1); }
+.dmarker.sel .ico { border-color:#fff; box-shadow:0 0 0 3px rgba(79,142,247,.5); }
+.dmarker.cbl-start .ico { border-color:#f59e0b; box-shadow:0 0 0 3px rgba(245,158,11,.5); animation:pulse .8s infinite; }
+.dmarker .lbl {
+  margin-top:3px; background:rgba(0,0,0,.8); padding:2px 6px;
+  border-radius:4px; font-size:9px; white-space:nowrap; color:#fff; max-width:100px;
+  overflow:hidden; text-overflow:ellipsis; text-align:center;
+}
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
+
+/* Tooltip */
+.tooltip {
+  position:fixed; background:#1e2130; border:1px solid var(--border);
+  border-radius:7px; padding:10px 14px; font-size:.78rem; z-index:500;
+  pointer-events:none; max-width:220px; box-shadow:0 8px 24px rgba(0,0,0,.5);
+  display:none;
+}
+.tooltip b { color:var(--accent); display:block; margin-bottom:4px; }
+.tooltip .row { display:flex; justify-content:space-between; gap:12px; color:var(--muted); margin-top:2px; }
+.tooltip .row span { color:var(--text); }
+
+/* Mode indicator */
+.mode-bar {
+  position:absolute; bottom:14px; left:50%; transform:translateX(-50%);
+  background:#1e2130ee; border:1px solid var(--accent); border-radius:20px;
+  padding:6px 18px; font-size:.78rem; color:var(--accent); z-index:100;
+  display:none; pointer-events:none;
+}
+.mode-bar.show { display:block; }
+
+/* No plan message */
+.no-plan {
+  position:absolute; inset:0; display:flex; flex-direction:column;
+  align-items:center; justify-content:center; color:var(--muted);
+}
+.no-plan .icon { font-size:4rem; margin-bottom:16px; opacity:.4; }
+.no-plan p { font-size:.9rem; }
+.no-plan small { font-size:.75rem; margin-top:6px; opacity:.6; }
+
+/* Zoom */
+.zoom-ctrl {
+  position:absolute; bottom:14px; right:14px; display:flex; flex-direction:column;
+  gap:4px; z-index:100;
+}
+.zbtn {
+  width:30px; height:30px; background:var(--surface2); border:1px solid var(--border);
+  color:var(--text); border-radius:5px; cursor:pointer; font-size:.9rem;
+  display:flex; align-items:center; justify-content:center; transition:all .15s;
+}
+.zbtn:hover { background:var(--border); }
+
+/* ── RIGHT PANEL ─────────────────────────────── */
+.detail-wrap { flex:1; overflow-y:auto; }
+.detail-empty { padding:30px 20px; text-align:center; color:var(--muted); font-size:.82rem; }
+.detail-empty .icon { font-size:2.5rem; opacity:.3; margin-bottom:10px; }
+
+.d-header { padding:16px 14px 10px; text-align:center; border-bottom:1px solid var(--border); }
+.d-header .big-ico { font-size:2.5rem; display:block; margin-bottom:4px; }
+.d-header .type-label { font-size:.72rem; font-weight:700; text-transform:uppercase; letter-spacing:.8px; }
+
+.d-field { padding:8px 14px; border-bottom:1px solid var(--border); }
+.d-field label { font-size:.68rem; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; display:block; margin-bottom:2px; }
+.d-field .val { font-size:.82rem; font-family:monospace; word-break:break-all; }
+.d-field .val.ip { color:#22c55e; }
+.d-field .val.mac { color:#60a5fa; }
+
+.d-actions { padding:12px 14px; display:flex; gap:8px; }
+.d-actions button { flex:1; padding:7px; border:1px solid var(--border); border-radius:5px; cursor:pointer; font-size:.78rem; }
+.d-actions .edit-btn { background:var(--surface2); color:var(--text); }
+.d-actions .edit-btn:hover { border-color:var(--accent); }
+.d-actions .del-btn { background:var(--surface2); color:var(--danger); border-color:var(--danger); }
+.d-actions .del-btn:hover { background:var(--danger); color:#fff; }
+
+.conn-list { padding:8px 14px; }
+.conn-list label { font-size:.68rem; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; display:block; margin-bottom:6px; }
+.conn-item { font-size:.75rem; padding:4px 8px; background:var(--bg); border-radius:4px; margin-bottom:3px; display:flex; align-items:center; gap:6px; }
+.conn-item .conn-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+.conn-item .conn-del { margin-left:auto; color:var(--danger); cursor:pointer; opacity:.5; }
+.conn-item .conn-del:hover { opacity:1; }
+
+/* ── MODAL ───────────────────────────────────── */
+.modal-bg {
+  display:none; position:fixed; inset:0; background:rgba(0,0,0,.7);
+  z-index:1000; align-items:center; justify-content:center;
+}
+.modal-bg.open { display:flex; }
+.modal {
+  background:var(--surface); border:1px solid var(--border); border-radius:10px;
+  padding:22px; width:420px; max-height:85vh; overflow-y:auto;
+  box-shadow:0 20px 60px rgba(0,0,0,.5);
+}
+.modal h2 { font-size:1rem; color:var(--accent); margin-bottom:18px; }
+.fgroup { margin-bottom:12px; }
+.fgroup label { display:block; font-size:.72rem; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; margin-bottom:4px; }
+.fgroup input, .fgroup select, .fgroup textarea {
+  width:100%; padding:7px 10px; background:var(--bg); border:1px solid var(--border);
+  border-radius:5px; color:var(--text); font-size:.82rem; transition:.15s;
+}
+.fgroup input:focus, .fgroup select:focus, .fgroup textarea:focus { outline:none; border-color:var(--accent); }
+.fgroup textarea { height:64px; resize:vertical; font-family:inherit; }
+.fgroup select option { background:var(--surface); }
+.modal-row { display:flex; gap:10px; }
+.modal-row .fgroup { flex:1; }
+.modal-foot { display:flex; gap:10px; justify-content:flex-end; margin-top:18px; }
+.mbtn { padding:7px 18px; border-radius:5px; cursor:pointer; font-size:.82rem; border:1px solid; }
+.mbtn.cancel { background:transparent; color:var(--muted); border-color:var(--border); }
+.mbtn.cancel:hover { border-color:var(--text); color:var(--text); }
+.mbtn.save { background:var(--accent); color:#fff; border-color:var(--accent); }
+.mbtn.save:hover { filter:brightness(1.1); }
+
+/* ── STATS BAR ───────────────────────────────── */
+.stats {
+  height:26px; background:var(--surface); border-top:1px solid var(--border);
+  display:flex; align-items:center; gap:20px; padding:0 16px;
+  font-size:.72rem; color:var(--muted); flex-shrink:0;
+}
+.stats b { color:var(--text); }
+
+/* ── CONTEXT MENU ────────────────────────────── */
+.ctx-menu {
+  display:none; position:fixed; background:var(--surface);
+  border:1px solid var(--border); border-radius:7px; padding:4px;
+  z-index:900; box-shadow:0 8px 24px rgba(0,0,0,.4); min-width:160px;
+}
+.ctx-menu.open { display:block; }
+.ctx-item {
+  padding:7px 14px; font-size:.78rem; cursor:pointer; border-radius:4px;
+  display:flex; align-items:center; gap:8px;
+}
+.ctx-item:hover { background:var(--surface2); }
+.ctx-item.danger { color:var(--danger); }
+.ctx-sep { height:1px; background:var(--border); margin:3px 0; }
+
+/* Scrollbar */
+::-webkit-scrollbar { width:5px; }
+::-webkit-scrollbar-track { background:transparent; }
+::-webkit-scrollbar-thumb { background:var(--border); border-radius:3px; }
+
+/* Cable select highlight */
+.cable-line:hover { stroke-width:4 !important; cursor:pointer; }
+</style>
+</head>
+<body>
+
+<!-- ── HEADER ──────────────────────────────────────────── -->
+<header>
+  <h1>🌐 MapeoRS — Infraestructura de Red</h1>
+
+  <label class="tbtn" for="file-plan" title="Cargar imagen del plano" style="cursor:pointer">📁 Cargar Plano</label>
+  <div class="sep"></div>
+  <button class="tbtn" id="btn-add-dev" title="Clic en el mapa para agregar equipo">➕ Agregar Equipo</button>
+  <button class="tbtn" id="btn-add-cab" title="Clic en dos equipos para conectar">🔗 Trazar Cable</button>
+  <div class="sep"></div>
+  <button class="tbtn success" id="btn-save">💾 Guardar</button>
+  <button class="tbtn" id="btn-export" title="Exportar como JSON">📤 Exportar</button>
+  <button class="tbtn" id="btn-import" title="Importar JSON">📥 Importar</button>
+  <div class="sep"></div>
+  <button class="tbtn" id="btn-help" title="Atajos de teclado">❓ Ayuda</button>
+
+  <input type="file" id="file-plan" accept="image/*" style="display:none">
+  <input type="file" id="file-import-json" accept=".json" style="display:none">
+</header>
+
+<!-- ── MAIN ────────────────────────────────────────────── -->
+<main>
+
+  <!-- Left sidebar -->
+  <div class="sidebar" id="sidebar-left">
+    <div class="sb-head">Equipos (<span id="cnt-dev">0</span>)</div>
+    <div class="search-box">
+      <input type="text" id="dev-search" placeholder="Buscar equipo, IP, MAC…">
+    </div>
+    <div class="device-list" id="dev-list"></div>
+
+    <!-- Cable list -->
+    <div class="cable-section">
+      <div class="sb-head" id="cables-toggle">Cables (<span id="cnt-cab">0</span>) ▾</div>
+      <div id="cable-list-wrap" style="max-height:160px; overflow-y:auto; padding:4px;"></div>
+    </div>
+
+    <!-- Legend -->
+    <div class="legend">
+      <h4>Tipos de equipo</h4>
+      <div id="legend-wrap"></div>
+    </div>
+  </div>
+
+  <!-- Map -->
+  <div class="map-wrap" id="map-wrap">
+    <div id="no-plan-msg" class="no-plan">
+      <div class="icon">🗺️</div>
+      <p>Cargá el plano del edificio</p>
+      <small>Botón "Cargar Plano" en la barra superior</small>
+    </div>
+
+    <div class="map-vp" id="map-vp">
+      <img id="floor-img" class="floor-img" style="display:none" draggable="false">
+      <svg id="cables-svg" class="cables-svg" style="position:absolute;top:0;left:0;overflow:visible;pointer-events:none;"></svg>
+      <div id="dev-layer" class="dev-layer" style="pointer-events:none;"></div>
+    </div>
+
+    <div class="mode-bar" id="mode-bar"></div>
+
+    <div class="zoom-ctrl">
+      <button class="zbtn" onclick="doZoom(1.2)" title="Acercar">+</button>
+      <button class="zbtn" onclick="doZoom(0)"   title="Restablecer">⟳</button>
+      <button class="zbtn" onclick="doZoom(0.8)" title="Alejar">−</button>
+    </div>
+  </div>
+
+  <!-- Right sidebar -->
+  <div class="sidebar right" id="sidebar-right">
+    <div class="sb-head">Detalles</div>
+    <div class="detail-wrap" id="detail-wrap">
+      <div class="detail-empty">
+        <div class="icon">🖱️</div>
+        <p>Seleccioná un equipo<br>para ver sus detalles</p>
+      </div>
+    </div>
+  </div>
+
+</main>
+
+<!-- Stats bar -->
+<div class="stats">
+  <span>Equipos: <b id="s-devs">0</b></span>
+  <span>Cables: <b id="s-cabs">0</b></span>
+  <span>Zoom: <b id="s-zoom">100%</b></span>
+  <span id="s-mode">Modo: <b>Selección</b></span>
+  <span style="margin-left:auto; font-size:.68rem;">Teclas: ESC=cancelar · DEL=eliminar · Rueda=zoom · Clic derecho/medio=mover mapa</span>
+</div>
+
+<!-- Tooltip -->
+<div class="tooltip" id="tooltip"></div>
+
+<!-- Context menu -->
+<div class="ctx-menu" id="ctx-menu">
+  <div class="ctx-item" id="ctx-edit">✏️ Editar equipo</div>
+  <div class="ctx-item" id="ctx-cable">🔗 Trazar cable desde aquí</div>
+  <div class="ctx-sep"></div>
+  <div class="ctx-item danger" id="ctx-del">🗑️ Eliminar equipo</div>
+</div>
+
+<!-- ── DEVICE MODAL ─────────────────────────────────────── -->
+<div class="modal-bg" id="dev-modal">
+  <div class="modal">
+    <h2 id="dev-modal-title">➕ Agregar Equipo</h2>
+
+    <div class="modal-row">
+      <div class="fgroup" style="flex:1.2">
+        <label>Tipo de Equipo</label>
+        <select id="d-type"></select>
+      </div>
+      <div class="fgroup" style="flex:1">
+        <label>Nombre / ID</label>
+        <input type="text" id="d-name" placeholder="Server-01, SW-Main…">
+      </div>
+    </div>
+
+    <div class="modal-row">
+      <div class="fgroup">
+        <label>Responsable / Dueño</label>
+        <input type="text" id="d-owner" placeholder="Nombre del usuario">
+      </div>
+      <div class="fgroup">
+        <label>Hostname</label>
+        <input type="text" id="d-host" placeholder="nombre-pc">
+      </div>
+    </div>
+
+    <div class="modal-row">
+      <div class="fgroup">
+        <label>Dirección IP</label>
+        <input type="text" id="d-ip" placeholder="192.168.1.x">
+      </div>
+      <div class="fgroup">
+        <label>Máscara / VLAN</label>
+        <input type="text" id="d-mask" placeholder="255.255.255.0 / VLAN10">
+      </div>
+    </div>
+
+    <div class="modal-row">
+      <div class="fgroup">
+        <label>Dirección MAC</label>
+        <input type="text" id="d-mac" placeholder="AA:BB:CC:DD:EE:FF">
+      </div>
+      <div class="fgroup">
+        <label>Sistema Operativo</label>
+        <input type="text" id="d-os" placeholder="Windows 11, Ubuntu…">
+      </div>
+    </div>
+
+    <div class="modal-row">
+      <div class="fgroup">
+        <label>Nro. de Serie / Modelo</label>
+        <input type="text" id="d-model" placeholder="Modelo del equipo">
+      </div>
+      <div class="fgroup">
+        <label>Puerto de Switch</label>
+        <input type="text" id="d-port" placeholder="Fa0/1, eth1…">
+      </div>
+    </div>
+
+    <div class="fgroup">
+      <label>Notas / Observaciones</label>
+      <textarea id="d-notes" placeholder="Información adicional sobre el equipo…"></textarea>
+    </div>
+
+    <div class="modal-foot">
+      <button class="mbtn cancel" onclick="closeDevModal()">Cancelar</button>
+      <button class="mbtn save" onclick="saveDevice()">💾 Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── CABLE MODAL ──────────────────────────────────────── -->
+<div class="modal-bg" id="cab-modal">
+  <div class="modal" style="width:360px">
+    <h2>🔗 Configurar Conexión</h2>
+    <div style="background:var(--bg); border-radius:6px; padding:10px 12px; margin-bottom:14px; font-size:.8rem; color:var(--muted);">
+      <span id="cab-from-label" style="color:var(--text)">—</span>
+      <span style="margin:0 8px">⟷</span>
+      <span id="cab-to-label" style="color:var(--text)">—</span>
+    </div>
+    <div class="modal-row">
+      <div class="fgroup">
+        <label>Tipo de medio</label>
+        <select id="c-type">
+          <option value="eth">Ethernet UTP/FTP</option>
+          <option value="fiber">Fibra Óptica</option>
+          <option value="wifi">WiFi (inalámbrico)</option>
+          <option value="coax">Coaxial</option>
+          <option value="serial">Serial / RS-232</option>
+        </select>
+      </div>
+      <div class="fgroup">
+        <label>Velocidad / Categoría</label>
+        <input type="text" id="c-speed" placeholder="1Gbps, CAT6, OM3…">
+      </div>
+    </div>
+    <div class="modal-row">
+      <div class="fgroup">
+        <label>Puerto origen</label>
+        <input type="text" id="c-pfrom" placeholder="eth0, Fa0/1…">
+      </div>
+      <div class="fgroup">
+        <label>Puerto destino</label>
+        <input type="text" id="c-pto" placeholder="eth0, Fa0/2…">
+      </div>
+    </div>
+    <div class="fgroup">
+      <label>Etiqueta del cable</label>
+      <input type="text" id="c-label" placeholder="Patch azul 2m, Troncal fibra…">
+    </div>
+    <div class="modal-foot">
+      <button class="mbtn cancel" onclick="closeCabModal()">Cancelar</button>
+      <button class="mbtn save" onclick="saveCable()">💾 Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── HELP MODAL ───────────────────────────────────────── -->
+<div class="modal-bg" id="help-modal">
+  <div class="modal" style="width:400px">
+    <h2>⌨️ Atajos & Ayuda</h2>
+    <table style="width:100%; font-size:.8rem; border-collapse:collapse;">
+      <tr><td style="padding:5px 0; color:var(--muted); width:140px">ESC</td><td>Cancelar modo actual</td></tr>
+      <tr><td style="padding:5px 0; color:var(--muted)">DEL / Supr</td><td>Eliminar equipo seleccionado</td></tr>
+      <tr><td style="padding:5px 0; color:var(--muted)">Rueda del mouse</td><td>Zoom in/out</td></tr>
+      <tr><td style="padding:5px 0; color:var(--muted)">Clic derecho + arrastrar</td><td>Mover el mapa (pan)</td></tr>
+      <tr><td style="padding:5px 0; color:var(--muted)">Ctrl + arrastrar mapa</td><td>Pan alternativo</td></tr>
+      <tr><td style="padding:5px 0; color:var(--muted)">Arrastrar equipo</td><td>Reposicionar en el mapa</td></tr>
+      <tr><td style="padding:5px 0; color:var(--muted)">Clic derecho equipo</td><td>Menú contextual</td></tr>
+      <tr><td style="padding:5px 0; color:var(--muted)">Doble clic equipo</td><td>Editar equipo</td></tr>
+    </table>
+    <div style="margin-top:14px; padding:10px; background:var(--bg); border-radius:6px; font-size:.75rem; color:var(--muted);">
+      💾 Los datos se guardan automáticamente en el navegador (localStorage).<br>
+      Usá Exportar/Importar JSON para hacer backups o compartir el plano.
+    </div>
+    <div class="modal-foot">
+      <button class="mbtn save" onclick="closeHelp()">Cerrar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════ -->
+<script>
+// ── CONFIG ────────────────────────────────────────────────
+const TYPES = {
+  server:  { label:'Servidor',        icon:'🖥️',  color:'#ef4444' },
+  switch:  { label:'Switch',          icon:'🔀',  color:'#3b82f6' },
+  router:  { label:'Router / Modem',  icon:'📡',  color:'#8b5cf6' },
+  ap:      { label:'Access Point',    icon:'📶',  color:'#06b6d4' },
+  pc:      { label:'PC / Workstation',icon:'🖱️',  color:'#22c55e' },
+  laptop:  { label:'Laptop',          icon:'💻',  color:'#84cc16' },
+  printer: { label:'Impresora',       icon:'🖨️',  color:'#f59e0b' },
+  camera:  { label:'Cámara IP',       icon:'📷',  color:'#f97316' },
+  fiber:   { label:'Nodo Fibra',      icon:'🔆',  color:'#67e8f9' },
+  ups:     { label:'UPS',             icon:'🔋',  color:'#a78bfa' },
+  phone:   { label:'Teléfono IP',     icon:'📞',  color:'#fb7185' },
+  other:   { label:'Otro',            icon:'📦',  color:'#94a3b8' }
+};
+
+const CABLE_TYPES = {
+  eth:    { label:'Ethernet',     color:'#3b82f6', dash:'' },
+  fiber:  { label:'Fibra',        color:'#06b6d4', dash:'6,3' },
+  wifi:   { label:'WiFi',         color:'#22c55e', dash:'3,6' },
+  coax:   { label:'Coaxial',      color:'#f59e0b', dash:'8,3' },
+  serial: { label:'Serial',       color:'#a78bfa', dash:'1,4' }
+};
+
+// ── STATE ─────────────────────────────────────────────────
+let S = {
+  devices: [],
+  cables: [],
+  plan: null,         // base64 image
+  planW: 0, planH: 0,
+  mode: 'sel',        // sel | add | cable
+  sel: null,          // selected device id
+  cabStart: null,     // first device for cable
+  pendingPos: null,   // position for new device
+  pendingCab: null,   // {from, to} for new cable
+  editId: null,
+  zoom: 1,
+  pan: { x: 0, y: 0 },
+  panning: false,
+  panOrigin: { x: 0, y: 0 },
+  seq: 1,
+  ctxId: null
+};
+
+// ── DOM REFS ──────────────────────────────────────────────
+const mapWrap    = document.getElementById('map-wrap');
+const mapVp      = document.getElementById('map-vp');
+const floorImg   = document.getElementById('floor-img');
+const cabSvg     = document.getElementById('cables-svg');
+const devLayer   = document.getElementById('dev-layer');
+const noPlanMsg  = document.getElementById('no-plan-msg');
+const modeBar    = document.getElementById('mode-bar');
+const tooltip    = document.getElementById('tooltip');
+const ctxMenu    = document.getElementById('ctx-menu');
+
+// ── INDEXEDDB (almacena la imagen del plano, sin límite de tamaño) ──
+let _idb = null;
+function openIDB() {
+  return new Promise((res, rej) => {
+    if (_idb) { res(_idb); return; }
+    const req = indexedDB.open('MapeoRS', 1);
+    req.onupgradeneeded = e => e.target.result.createObjectStore('kv');
+    req.onsuccess = e => { _idb = e.target.result; res(_idb); };
+    req.onerror   = () => rej(req.error);
+  });
+}
+async function idbPut(key, val) {
+  const db = await openIDB();
+  return new Promise((res, rej) => {
+    const tx = db.transaction('kv', 'readwrite');
+    tx.objectStore('kv').put(val, key);
+    tx.oncomplete = res; tx.onerror = () => rej(tx.error);
+  });
+}
+async function idbGet(key) {
+  const db = await openIDB();
+  return new Promise(res => {
+    const tx = db.transaction('kv', 'readonly');
+    const req = tx.objectStore('kv').get(key);
+    req.onsuccess = () => res(req.result || null);
+    req.onerror   = () => res(null);
+  });
+}
+
+// ── BOOT ──────────────────────────────────────────────────
+(async function boot() {
+  buildTypeSelect();
+  buildLegend();
+  loadStorage();
+  bindEvents();
+  render();
+  // Cargar plano guardado desde IndexedDB
+  try {
+    const saved = await idbGet('plan');
+    if (saved) applyPlan(saved, false);
+  } catch(e) {}
+})();
+
+// ── STORAGE (solo equipos y cables, sin imagen) ───────────
+function saveStorage() {
+  try {
+    localStorage.setItem('mapeoRS', JSON.stringify({
+      devices: S.devices, cables: S.cables, seq: S.seq
+    }));
+  } catch(e) {}
+}
+
+function loadStorage() {
+  try {
+    const raw = localStorage.getItem('mapeoRS');
+    if (!raw) return;
+    const d = JSON.parse(raw);
+    S.devices = d.devices || [];
+    S.cables  = d.cables  || [];
+    S.seq     = d.seq     || 1;
+  } catch(e) {}
+}
+
+// ── FLOOR PLAN ────────────────────────────────────────────
+document.getElementById('file-plan').onchange = function() {
+  const f = this.files[0]; if (!f) return;
+  // createObjectURL: display inmediato sin race condition
+  const objUrl = URL.createObjectURL(f);
+  applyPlan(objUrl, true);
+  // Guardar en IndexedDB para persistencia entre sesiones
+  const r = new FileReader();
+  r.onload = async ev => {
+    try { await idbPut('plan', ev.target.result); } catch(e) {}
+  };
+  r.readAsDataURL(f);
+  this.value = '';
+};
+
+function applyPlan(src, resetPan) {
+  // onload ANTES de src para evitar race condition
+  floorImg.onload = () => {
+    S.planW = floorImg.naturalWidth;
+    S.planH = floorImg.naturalHeight;
+    floorImg.style.display = 'block';
+    noPlanMsg.style.display = 'none';
+    cabSvg.style.width    = S.planW + 'px';
+    cabSvg.style.height   = S.planH + 'px';
+    devLayer.style.width  = S.planW + 'px';
+    devLayer.style.height = S.planH + 'px';
+    if (resetPan) fitPlan();
+    render();
+  };
+  floorImg.onerror = () => {
+    noPlanMsg.style.display = 'flex';
+    alert('No se pudo cargar la imagen. Usá formato JPG o PNG.');
+  };
+  floorImg.src = src;
+}
+
+function fitPlan() {
+  const r = mapWrap.getBoundingClientRect();
+  const sx = (r.width  - 40) / S.planW;
+  const sy = (r.height - 40) / S.planH;
+  S.zoom = Math.min(sx, sy, 1);
+  S.pan.x = (r.width  - S.planW * S.zoom) / 2;
+  S.pan.y = (r.height - S.planH * S.zoom) / 2;
+  applyTransform();
+}
+
+// ── TRANSFORM ────────────────────────────────────────────
+function applyTransform() {
+  mapVp.style.transform = `translate(${S.pan.x}px,${S.pan.y}px) scale(${S.zoom})`;
+  document.getElementById('s-zoom').textContent = Math.round(S.zoom * 100) + '%';
+}
+
+function doZoom(factor) {
+  if (factor === 0) { fitPlan(); return; }
+  const r = mapWrap.getBoundingClientRect();
+  zoomAt(r.width / 2, r.height / 2, factor);
+}
+
+function zoomAt(cx, cy, factor) {
+  const bx = (cx - S.pan.x) / S.zoom;
+  const by = (cy - S.pan.y) / S.zoom;
+  S.zoom = Math.max(0.1, Math.min(8, S.zoom * factor));
+  S.pan.x = cx - bx * S.zoom;
+  S.pan.y = cy - by * S.zoom;
+  applyTransform();
+}
+
+function mapCoords(e) {
+  const r = mapWrap.getBoundingClientRect();
+  return {
+    x: (e.clientX - r.left - S.pan.x) / S.zoom,
+    y: (e.clientY - r.top  - S.pan.y) / S.zoom
+  };
+}
+
+// ── EVENTS ───────────────────────────────────────────────
+function bindEvents() {
+  // Wheel zoom
+  mapWrap.addEventListener('wheel', e => {
+    e.preventDefault();
+    const r = mapWrap.getBoundingClientRect();
+    zoomAt(e.clientX - r.left, e.clientY - r.top, e.deltaY < 0 ? 1.12 : 0.9);
+  }, { passive: false });
+
+  // Pan (right-click drag or ctrl+drag)
+  mapWrap.addEventListener('mousedown', e => {
+    if (e.button === 2 || (e.button === 0 && e.ctrlKey)) {
+      e.preventDefault();
+      S.panning = true;
+      S.panOrigin = { x: e.clientX - S.pan.x, y: e.clientY - S.pan.y };
+      mapWrap.style.cursor = 'grabbing';
+    }
+  });
+  document.addEventListener('mousemove', e => {
+    if (S.panning) {
+      S.pan.x = e.clientX - S.panOrigin.x;
+      S.pan.y = e.clientY - S.panOrigin.y;
+      applyTransform();
+    }
+    if (S.mode === 'cable' && S.cabStart) {
+      renderTempCable(mapCoords(e));
+    }
+  });
+  document.addEventListener('mouseup', e => {
+    if (S.panning) {
+      S.panning = false;
+      mapWrap.style.cursor = '';
+    }
+  });
+  mapWrap.addEventListener('contextmenu', e => e.preventDefault());
+
+  // Click on map (add device)
+  mapWrap.addEventListener('click', e => {
+    if (S.panning) return;
+    if (e.button !== 0) return;
+    const tgt = e.target;
+    if (tgt === mapWrap || tgt === mapVp || tgt === floorImg || tgt === cabSvg) {
+      if (S.mode === 'add') {
+        S.pendingPos = mapCoords(e);
+        openDevModal();
+      } else if (S.mode === 'cable' && S.cabStart) {
+        // clicked empty — cancel cable
+        S.cabStart = null;
+        clearTempCable();
+        setMode('sel');
+      } else {
+        select(null);
+      }
+    }
+    closeCtx();
+  });
+
+  // Keyboard
+  document.addEventListener('keydown', e => {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
+    if (e.key === 'Escape') { cancelMode(); }
+    if ((e.key === 'Delete' || e.key === 'Supr') && S.sel) { deleteDevice(S.sel); }
+  });
+
+  // Toolbar
+  document.getElementById('btn-add-dev').onclick  = () => setMode('add');
+  document.getElementById('btn-add-cab').onclick  = () => setMode('cable');
+  document.getElementById('btn-save').onclick     = () => { saveStorage(); flashBtn('btn-save', '✅ Guardado'); };
+  document.getElementById('btn-export').onclick   = exportJSON;
+  document.getElementById('btn-import').onclick   = () => document.getElementById('file-import-json').click();
+  document.getElementById('file-import-json').onchange = importJSON;
+  document.getElementById('btn-help').onclick     = () => document.getElementById('help-modal').classList.add('open');
+
+  // Search
+  document.getElementById('dev-search').oninput = renderDevList;
+
+  // Context menu
+  document.getElementById('ctx-edit').onclick  = () => { if(S.ctxId){ openDevModal(S.ctxId); closeCtx(); } };
+  document.getElementById('ctx-cable').onclick = () => { if(S.ctxId){ setMode('cable'); startCable(S.ctxId); closeCtx(); } };
+  document.getElementById('ctx-del').onclick   = () => { if(S.ctxId){ deleteDevice(S.ctxId); closeCtx(); } };
+
+  document.addEventListener('click', e => {
+    if (!ctxMenu.contains(e.target)) closeCtx();
+  });
+}
+
+// ── MODE ─────────────────────────────────────────────────
+function setMode(m) {
+  S.mode = m;
+  S.cabStart = null;
+  clearTempCable();
+  const labels = { sel:'Selección', add:'Agregar Equipo — clic en el plano', cable:'Cable — clic en equipo origen' };
+  document.getElementById('s-mode').innerHTML = `Modo: <b>${labels[m]||m}</b>`;
+  if (m === 'sel') {
+    modeBar.classList.remove('show');
+    mapWrap.style.cursor = '';
+  } else {
+    modeBar.textContent = m === 'add'
+      ? '➕ Clic en el plano para ubicar el equipo — ESC para cancelar'
+      : '🔗 Clic en el equipo ORIGEN — ESC para cancelar';
+    modeBar.classList.add('show');
+    mapWrap.style.cursor = m === 'add' ? 'crosshair' : 'default';
+  }
+  document.getElementById('btn-add-dev').classList.toggle('active', m === 'add');
+  document.getElementById('btn-add-cab').classList.toggle('active', m === 'cable');
+}
+
+function cancelMode() {
+  S.cabStart = null; clearTempCable();
+  setMode('sel');
+  closeDevModal(); closeCabModal();
+}
+
+// ── DEVICE MODAL ──────────────────────────────────────────
+function buildTypeSelect() {
+  const sel = document.getElementById('d-type');
+  for (const [k, v] of Object.entries(TYPES)) {
+    const o = document.createElement('option');
+    o.value = k; o.textContent = v.icon + ' ' + v.label;
+    sel.appendChild(o);
+  }
+}
+
+function openDevModal(id) {
+  S.editId = id || null;
+  document.getElementById('dev-modal-title').textContent = id ? '✏️ Editar Equipo' : '➕ Agregar Equipo';
+  const d = id ? S.devices.find(x => x.id === id) : null;
+  document.getElementById('d-type').value  = d?.type  || 'pc';
+  document.getElementById('d-name').value  = d?.name  || '';
+  document.getElementById('d-owner').value = d?.owner || '';
+  document.getElementById('d-host').value  = d?.host  || '';
+  document.getElementById('d-ip').value    = d?.ip    || '';
+  document.getElementById('d-mask').value  = d?.mask  || '';
+  document.getElementById('d-mac').value   = d?.mac   || '';
+  document.getElementById('d-os').value    = d?.os    || '';
+  document.getElementById('d-model').value = d?.model || '';
+  document.getElementById('d-port').value  = d?.port  || '';
+  document.getElementById('d-notes').value = d?.notes || '';
+  document.getElementById('dev-modal').classList.add('open');
+  document.getElementById('d-name').focus();
+}
+
+function closeDevModal() {
+  document.getElementById('dev-modal').classList.remove('open');
+  S.pendingPos = null; S.editId = null;
+  if (S.mode === 'add') setMode('sel');
+}
+
+function saveDevice() {
+  const type = document.getElementById('d-type').value;
+  const name = document.getElementById('d-name').value.trim() || TYPES[type].label;
+
+  if (S.editId) {
+    const d = S.devices.find(x => x.id === S.editId);
+    if (d) Object.assign(d, getData(type, name));
+  } else {
+    const d = { id: 'D' + (S.seq++), ...getData(type, name), x: S.pendingPos.x, y: S.pendingPos.y };
+    S.devices.push(d);
+    select(d.id);
+  }
+  closeDevModal();
+  render(); saveStorage();
+}
+
+function getData(type, name) {
+  return {
+    type, name,
+    owner: document.getElementById('d-owner').value.trim(),
+    host:  document.getElementById('d-host').value.trim(),
+    ip:    document.getElementById('d-ip').value.trim(),
+    mask:  document.getElementById('d-mask').value.trim(),
+    mac:   document.getElementById('d-mac').value.trim(),
+    os:    document.getElementById('d-os').value.trim(),
+    model: document.getElementById('d-model').value.trim(),
+    port:  document.getElementById('d-port').value.trim(),
+    notes: document.getElementById('d-notes').value.trim()
+  };
+}
+
+function deleteDevice(id) {
+  if (!confirm('¿Eliminar este equipo y todas sus conexiones?')) return;
+  S.devices = S.devices.filter(d => d.id !== id);
+  S.cables  = S.cables.filter(c => c.from !== id && c.to !== id);
+  if (S.sel === id) select(null);
+  render(); saveStorage();
+}
+
+// ── CABLE ─────────────────────────────────────────────────
+function startCable(id) {
+  S.cabStart = id;
+  setMode('cable');
+  modeBar.textContent = '🔗 Ahora clic en el equipo DESTINO — ESC para cancelar';
+  renderDevMarkers(); // update highlight
+}
+
+function finishCable(toId) {
+  S.pendingCab = { from: S.cabStart, to: toId };
+  const fromD = S.devices.find(x => x.id === S.cabStart);
+  const toD   = S.devices.find(x => x.id === toId);
+  document.getElementById('cab-from-label').textContent = fromD?.name || S.cabStart;
+  document.getElementById('cab-to-label').textContent   = toD?.name   || toId;
+  document.getElementById('c-type').value  = 'eth';
+  document.getElementById('c-speed').value = '';
+  document.getElementById('c-pfrom').value = '';
+  document.getElementById('c-pto').value   = '';
+  document.getElementById('c-label').value = '';
+  document.getElementById('cab-modal').classList.add('open');
+  S.cabStart = null; clearTempCable();
+}
+
+function closeCabModal() {
+  document.getElementById('cab-modal').classList.remove('open');
+  S.pendingCab = null;
+  setMode('sel');
+}
+
+function saveCable() {
+  if (!S.pendingCab) return;
+  S.cables.push({
+    id:    'C' + (S.seq++),
+    from:  S.pendingCab.from,
+    to:    S.pendingCab.to,
+    type:  document.getElementById('c-type').value,
+    speed: document.getElementById('c-speed').value.trim(),
+    pfrom: document.getElementById('c-pfrom').value.trim(),
+    pto:   document.getElementById('c-pto').value.trim(),
+    label: document.getElementById('c-label').value.trim()
+  });
+  closeCabModal();
+  render(); saveStorage();
+}
+
+function deleteCable(id) {
+  S.cables = S.cables.filter(c => c.id !== id);
+  renderDetail(S.sel);
+  renderCables(); renderCableList();
+  document.getElementById('s-cabs').textContent = S.cables.length;
+  document.getElementById('cnt-cab').textContent = S.cables.length;
+  saveStorage();
+}
+
+// ── TEMP CABLE ───────────────────────────────────────────
+let tempLine = null;
+function renderTempCable(pos) {
+  if (!S.cabStart) return;
+  const d = S.devices.find(x => x.id === S.cabStart);
+  if (!d) return;
+  clearTempCable();
+  const ln = mkLine(d.x, d.y, pos.x, pos.y, '#f59e0b', '', 2, .6);
+  ln.setAttribute('pointer-events', 'none');
+  cabSvg.appendChild(ln);
+  tempLine = ln;
+}
+function clearTempCable() {
+  if (tempLine) { cabSvg.removeChild(tempLine); tempLine = null; }
+}
+
+// ── RENDER ────────────────────────────────────────────────
+function render() {
+  renderDevMarkers();
+  renderCables();
+  renderDevList();
+  renderCableList();
+  renderDetail(S.sel);
+  document.getElementById('cnt-dev').textContent = S.devices.length;
+  document.getElementById('cnt-cab').textContent = S.cables.length;
+  document.getElementById('s-devs').textContent  = S.devices.length;
+  document.getElementById('s-cabs').textContent  = S.cables.length;
+}
+
+function renderDevMarkers() {
+  devLayer.innerHTML = '';
+  for (const d of S.devices) {
+    const T = TYPES[d.type] || TYPES.other;
+    const el = document.createElement('div');
+    el.className = 'dmarker' +
+      (d.id === S.sel      ? ' sel'       : '') +
+      (d.id === S.cabStart ? ' cbl-start' : '');
+    el.dataset.id = d.id;
+    el.style.left = d.x + 'px';
+    el.style.top  = d.y + 'px';
+    el.style.pointerEvents = 'all';
+    el.innerHTML = `
+      <div class="ico" style="background:${T.color}22;border-color:${T.color}88">${T.icon}</div>
+      <div class="lbl">${esc(d.name)}</div>`;
+
+    // Click
+    el.addEventListener('click', e => {
+      e.stopPropagation();
+      if (S.mode === 'cable') {
+        if (!S.cabStart) startCable(d.id);
+        else if (S.cabStart !== d.id) finishCable(d.id);
+      } else {
+        select(d.id);
+      }
+    });
+
+    // Double-click to edit
+    el.addEventListener('dblclick', e => { e.stopPropagation(); openDevModal(d.id); });
+
+    // Right-click context menu
+    el.addEventListener('contextmenu', e => {
+      e.preventDefault(); e.stopPropagation();
+      S.ctxId = d.id;
+      ctxMenu.style.left = e.clientX + 'px';
+      ctxMenu.style.top  = e.clientY + 'px';
+      ctxMenu.classList.add('open');
+    });
+
+    // Hover tooltip
+    el.addEventListener('mouseenter', e => showTip(d, e));
+    el.addEventListener('mouseleave', () => { tooltip.style.display = 'none'; });
+    el.addEventListener('mousemove',  e => moveTip(e));
+
+    // Drag
+    makeDraggable(el, d);
+    devLayer.appendChild(el);
+  }
+}
+
+function renderCables() {
+  cabSvg.innerHTML = '';
+  for (const c of S.cables) {
+    const f = S.devices.find(d => d.id === c.from);
+    const t = S.devices.find(d => d.id === c.to);
+    if (!f || !t) continue;
+    const CT = CABLE_TYPES[c.type] || CABLE_TYPES.eth;
+
+    const ln = mkLine(f.x, f.y, t.x, t.y, CT.color, CT.dash, 2);
+    ln.classList.add('cable-line');
+    ln.style.pointerEvents = 'stroke';
+    ln.setAttribute('stroke-width', '2.5');
+    ln.title = (c.label || CT.label);
+    ln.addEventListener('click', e => { e.stopPropagation(); showCableDetail(c); });
+
+    cabSvg.appendChild(ln);
+
+    if (c.label || c.speed) {
+      const mx = (f.x + t.x) / 2, my = (f.y + t.y) / 2;
+      const txt = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      txt.setAttribute('x', mx); txt.setAttribute('y', my - 6);
+      txt.setAttribute('text-anchor', 'middle');
+      txt.setAttribute('fill', CT.color);
+      txt.setAttribute('font-size', '10');
+      txt.setAttribute('font-family', 'Segoe UI,sans-serif');
+      txt.setAttribute('pointer-events', 'none');
+      txt.textContent = [c.label, c.speed].filter(Boolean).join(' · ');
+      cabSvg.appendChild(txt);
+    }
+  }
+  if (tempLine) cabSvg.appendChild(tempLine); // re-add temp
+}
+
+function mkLine(x1, y1, x2, y2, color, dash, width, opacity) {
+  const ln = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+  ln.setAttribute('x1', x1); ln.setAttribute('y1', y1);
+  ln.setAttribute('x2', x2); ln.setAttribute('y2', y2);
+  ln.setAttribute('stroke', color);
+  ln.setAttribute('stroke-width', width || 2);
+  if (dash) ln.setAttribute('stroke-dasharray', dash);
+  if (opacity != null) ln.setAttribute('opacity', opacity);
+  return ln;
+}
+
+function renderDevList() {
+  const q = document.getElementById('dev-search').value.toLowerCase();
+  const list = document.getElementById('dev-list');
+  list.innerHTML = '';
+  const filtered = S.devices.filter(d =>
+    !q || d.name.toLowerCase().includes(q) ||
+    (d.ip  && d.ip.includes(q)) ||
+    (d.mac && d.mac.toLowerCase().includes(q)) ||
+    (d.owner && d.owner.toLowerCase().includes(q))
+  );
+  for (const d of filtered) {
+    const T = TYPES[d.type] || TYPES.other;
+    const el = document.createElement('div');
+    el.className = 'dev-item' + (d.id === S.sel ? ' selected' : '');
+    el.innerHTML = `
+      <div class="dev-dot" style="background:${T.color}"></div>
+      <div class="dev-info">
+        <b>${esc(d.name)}</b>
+        <small>${d.ip || d.mac || T.label}</small>
+      </div>`;
+    el.onclick = () => { select(d.id); panTo(d); };
+    list.appendChild(el);
+  }
+}
+
+function renderCableList() {
+  const wrap = document.getElementById('cable-list-wrap');
+  wrap.innerHTML = '';
+  for (const c of S.cables) {
+    const f = S.devices.find(d => d.id === c.from);
+    const t = S.devices.find(d => d.id === c.to);
+    const CT = CABLE_TYPES[c.type] || CABLE_TYPES.eth;
+    const el = document.createElement('div');
+    el.style.cssText = `padding:5px 8px;margin:2px 0;border-radius:4px;font-size:.72rem;cursor:pointer;border-left:3px solid ${CT.color};padding-left:8px;background:var(--bg)`;
+    el.innerHTML = `<span style="color:${CT.color}">${CT.label}</span> · ${esc(f?.name||'?')} ↔ ${esc(t?.name||'?')}`;
+    el.onclick = () => showCableDetail(c);
+    wrap.appendChild(el);
+  }
+}
+
+function buildLegend() {
+  const wrap = document.getElementById('legend-wrap');
+  for (const [, T] of Object.entries(TYPES)) {
+    const el = document.createElement('div');
+    el.className = 'leg-item';
+    el.innerHTML = `<div class="dev-dot" style="background:${T.color}"></div>${T.icon} ${T.label}`;
+    wrap.appendChild(el);
+  }
+}
+
+// ── SELECT & DETAIL ───────────────────────────────────────
+function select(id) {
+  S.sel = id;
+  renderDevMarkers();
+  renderDevList();
+  renderDetail(id);
+}
+
+function renderDetail(id) {
+  const wrap = document.getElementById('detail-wrap');
+  if (!id) {
+    wrap.innerHTML = '<div class="detail-empty"><div class="icon">🖱️</div><p>Seleccioná un equipo<br>para ver sus detalles</p></div>';
+    return;
+  }
+  const d = S.devices.find(x => x.id === id);
+  if (!d) { wrap.innerHTML = ''; return; }
+  const T  = TYPES[d.type] || TYPES.other;
+  const cs = S.cables.filter(c => c.from === id || c.to === id);
+
+  let html = `
+    <div class="d-header">
+      <span class="big-ico">${T.icon}</span>
+      <div class="type-label" style="color:${T.color}">${T.label}</div>
+    </div>`;
+
+  const fields = [
+    ['Nombre',          d.name],
+    ['Responsable',     d.owner],
+    ['Hostname',        d.host],
+    ['Dirección IP',    d.ip,    'ip'],
+    ['Máscara / VLAN',  d.mask],
+    ['Dirección MAC',   d.mac,   'mac'],
+    ['Sistema Operativo', d.os],
+    ['Modelo / Serie',  d.model],
+    ['Puerto de SW',    d.port],
+    ['Notas',           d.notes]
+  ];
+  for (const [label, val, cls] of fields) {
+    if (!val) continue;
+    html += `<div class="d-field"><label>${label}</label><div class="val ${cls||''}">${esc(val)}</div></div>`;
+  }
+
+  if (cs.length) {
+    html += `<div class="conn-list"><label>Conexiones (${cs.length})</label>`;
+    for (const c of cs) {
+      const other = S.devices.find(x => x.id === (c.from === id ? c.to : c.from));
+      const CT = CABLE_TYPES[c.type] || CABLE_TYPES.eth;
+      html += `<div class="conn-item">
+        <div class="conn-dot" style="background:${CT.color}"></div>
+        <span>${esc(other?.name || '?')}</span>
+        <small style="color:${CT.color}">${CT.label}</small>
+        <span class="conn-del" onclick="deleteCable('${c.id}')" title="Eliminar cable">✕</span>
+      </div>`;
+    }
+    html += '</div>';
+  }
+
+  html += `<div class="d-actions">
+    <button class="edit-btn" onclick="openDevModal('${id}')">✏️ Editar</button>
+    <button class="del-btn"  onclick="deleteDevice('${id}')">🗑️</button>
+  </div>`;
+
+  wrap.innerHTML = html;
+}
+
+function showCableDetail(c) {
+  const f  = S.devices.find(d => d.id === c.from);
+  const t  = S.devices.find(d => d.id === c.to);
+  const CT = CABLE_TYPES[c.type] || CABLE_TYPES.eth;
+  const wrap = document.getElementById('detail-wrap');
+
+  let rows = `
+    <div class="d-header">
+      <span class="big-ico">🔗</span>
+      <div class="type-label" style="color:${CT.color}">${CT.label}</div>
+    </div>`;
+  const cfields = [
+    ['Desde',     f?.name || c.from],
+    ['Hacia',     t?.name || c.to],
+    ['Etiqueta',  c.label],
+    ['Velocidad', c.speed],
+    ['Puerto origen',  c.pfrom],
+    ['Puerto destino', c.pto]
+  ];
+  for (const [label, val] of cfields) {
+    if (!val) continue;
+    rows += `<div class="d-field"><label>${label}</label><div class="val">${esc(val)}</div></div>`;
+  }
+  rows += `<div class="d-actions">
+    <button class="del-btn" style="flex:1" onclick="deleteCable('${c.id}')">🗑️ Eliminar cable</button>
+  </div>`;
+
+  wrap.innerHTML = rows;
+  S.sel = null;
+  renderDevMarkers(); renderDevList();
+}
+
+// ── TOOLTIP ───────────────────────────────────────────────
+function showTip(d, e) {
+  const T = TYPES[d.type] || TYPES.other;
+  let rows = '';
+  if (d.owner) rows += `<div class="row"><span>Responsable</span><span>${esc(d.owner)}</span></div>`;
+  if (d.ip)    rows += `<div class="row"><span>IP</span><span style="color:#22c55e">${esc(d.ip)}</span></div>`;
+  if (d.mac)   rows += `<div class="row"><span>MAC</span><span style="color:#60a5fa">${esc(d.mac)}</span></div>`;
+  if (d.host)  rows += `<div class="row"><span>Host</span><span>${esc(d.host)}</span></div>`;
+  tooltip.innerHTML = `<b>${T.icon} ${esc(d.name)}</b>${rows}`;
+  tooltip.style.display = 'block';
+  moveTip(e);
+}
+function moveTip(e) {
+  tooltip.style.left = (e.clientX + 14) + 'px';
+  tooltip.style.top  = (e.clientY + 10) + 'px';
+}
+
+// ── DRAG DEVICE ───────────────────────────────────────────
+function makeDraggable(el, device) {
+  let down = false, moved = false;
+  let sx, sy, dx, dy;
+
+  el.addEventListener('mousedown', e => {
+    if (e.button !== 0 || S.mode !== 'sel') return;
+    e.stopPropagation(); e.preventDefault();
+    down = true; moved = false;
+    sx = e.clientX; sy = e.clientY;
+    dx = device.x;  dy = device.y;
+  });
+
+  document.addEventListener('mousemove', e => {
+    if (!down) return;
+    const ddx = (e.clientX - sx) / S.zoom;
+    const ddy = (e.clientY - sy) / S.zoom;
+    if (Math.abs(ddx) > 3 || Math.abs(ddy) > 3) moved = true;
+    if (moved) {
+      device.x = dx + ddx; device.y = dy + ddy;
+      el.style.left = device.x + 'px'; el.style.top = device.y + 'px';
+      renderCables();
+    }
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (down && moved) { saveStorage(); }
+    down = false;
+  });
+}
+
+// ── PAN TO DEVICE ─────────────────────────────────────────
+function panTo(d) {
+  const r = mapWrap.getBoundingClientRect();
+  S.pan.x = r.width  / 2 - d.x * S.zoom;
+  S.pan.y = r.height / 2 - d.y * S.zoom;
+  applyTransform();
+}
+
+// ── CTX MENU ──────────────────────────────────────────────
+function closeCtx() { ctxMenu.classList.remove('open'); }
+
+// ── EXPORT / IMPORT ───────────────────────────────────────
+function exportJSON() {
+  const data = {
+    version: '1.1',
+    exported: new Date().toISOString(),
+    devices: S.devices,
+    cables: S.cables,
+    seq: S.seq
+  };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'red_' + new Date().toISOString().slice(0, 10) + '.json';
+  a.click();
+}
+
+function importJSON() {
+  const f = this.files[0]; if (!f) return;
+  const r = new FileReader();
+  r.onload = ev => {
+    try {
+      const d = JSON.parse(ev.target.result);
+      if (!confirm('¿Importar? Esto reemplazará los equipos y cables actuales.')) return;
+      S.devices = d.devices || [];
+      S.cables  = d.cables  || [];
+      S.seq     = d.seq     || 1;
+      render(); saveStorage();
+    } catch { alert('Archivo JSON inválido.'); }
+  };
+  r.readAsText(f);
+  this.value = '';
+}
+
+// ── MISC ─────────────────────────────────────────────────
+function esc(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function flashBtn(id, label) {
+  const btn = document.getElementById(id);
+  const orig = btn.textContent;
+  btn.textContent = label;
+  setTimeout(() => btn.textContent = orig, 1600);
+}
+
+function closeHelp() { document.getElementById('help-modal').classList.remove('open'); }
+
+// Autosave on close
+window.addEventListener('beforeunload', saveStorage);
+</script>
+</body>
+</html>
