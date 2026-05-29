@@ -669,13 +669,13 @@ let _lastEdit  = 0;   // timestamp del último cambio local
 const FB_REF = () => fbDB.collection('maps').doc('shared');
 
 function initFirebase() {
-  firebase.initializeApp(FB_CONFIG);
-  fbDB = firebase.firestore();
-
-  // Persistencia offline: funciona sin internet y sincroniza al volver
-  fbDB.enablePersistence({ synchronizeTabs: true }).catch(() => {});
-
-  subscribeFB();
+  try {
+    firebase.initializeApp(FB_CONFIG);
+    fbDB = firebase.firestore();
+    subscribeFB();
+  } catch(e) {
+    setSyncStatus('error', 'Firebase: ' + e.message);
+  }
 }
 
 function subscribeFB() {
@@ -683,7 +683,6 @@ function subscribeFB() {
   setSyncStatus('connecting');
 
   _fbUnsub = FB_REF().onSnapshot({ includeMetadataChanges: true }, snap => {
-    // Ignorar mientras hay escrituras locales pendientes (evita loop)
     if (snap.metadata.hasPendingWrites) return;
     setSyncStatus('ok');
     if (!snap.exists) return;
@@ -691,26 +690,37 @@ function subscribeFB() {
     const d = snap.data();
     if (!Array.isArray(d?.devices)) return;
 
-    // Si el usuario editó en los últimos 3 s, no pisamos sus cambios aún
+    // No pisar si el usuario editó hace menos de 3 s
     if (Date.now() - _lastEdit < 3000) return;
 
     S.devices = d.devices;
     S.cables  = d.cables || [];
     S.seq     = d.seq    || 1;
     render(); _saveLocal();
-  }, () => setSyncStatus('error'));
+  }, err => {
+    // Error visible con instrucción
+    const msg = err.code === 'permission-denied'
+      ? '🔒 Reglas Firestore bloqueando — revisá Firebase Console → Firestore → Rules'
+      : '❌ ' + (err.code || err.message);
+    setSyncStatus('error', msg);
+  });
 }
 
-function setSyncStatus(s) {
+function setSyncStatus(s, customMsg) {
   const dot   = document.getElementById('sync-dot');
   const label = document.getElementById('sync-label');
-  if (dot)   dot.className = s;
-  const txt = { ok:'Sincronizado', saving:'Guardando…', connecting:'Conectando…', error:'Sin conexión' };
-  if (label) label.textContent = txt[s] || s;
+  if (dot) dot.className = s;
+  const txt = {
+    ok:         'Sincronizado ✓',
+    saving:     'Guardando…',
+    connecting: 'Conectando…',
+    error:      customMsg || 'Error de conexión'
+  };
+  if (label) label.textContent = txt[s] || customMsg || s;
 }
 
 async function saveToFirebase() {
-  if (!fbDB) return;
+  if (!fbDB) { setSyncStatus('error', 'Firebase no inicializado'); return; }
   setSyncStatus('saving');
   try {
     await FB_REF().set({
@@ -720,7 +730,12 @@ async function saveToFirebase() {
       updatedAt: firebase.firestore.FieldValue.serverTimestamp()
     });
     setSyncStatus('ok');
-  } catch(e) { setSyncStatus('error'); }
+  } catch(e) {
+    const msg = e.code === 'permission-denied'
+      ? '🔒 Reglas Firestore — habilitá escritura en Firebase Console'
+      : '❌ ' + (e.code || e.message);
+    setSyncStatus('error', msg);
+  }
 }
 
 // ── SHARE MODAL ───────────────────────────────────────────
