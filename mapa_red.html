@@ -308,8 +308,6 @@ main { display:flex; flex:1; overflow:hidden; }
     <span id="sync-dot"></span>
     <span id="sync-label">Conectando…</span>
   </div>
-  <button class="tbtn" id="btn-share" title="Ver URL y QR para abrir en el teléfono">📱 Compartir</button>
-  <div class="sep"></div>
   <button class="tbtn" id="btn-help" title="Atajos de teclado">❓ Ayuda</button>
 
   <input type="file" id="file-plan" accept="image/*" style="display:none">
@@ -541,27 +539,9 @@ main { display:flex; flex:1; overflow:hidden; }
   </div>
 </div>
 
-<!-- ── SHARE MODAL ───────────────────────────────────────── -->
-<div class="modal-bg" id="share-modal">
-  <div class="modal" style="width:360px;text-align:center">
-    <h2>📱 Abrir en otro dispositivo</h2>
-    <p style="font-size:.82rem;color:var(--muted);margin-bottom:16px">
-      Escaneá el QR con el teléfono o copiá la URL.<br>Los datos se sincronizan automáticamente.
-    </p>
-    <img id="qr-code" src="" width="200" height="200" style="border-radius:8px;margin-bottom:14px;background:#fff;padding:6px">
-    <div id="share-url-box" style="background:var(--bg);border-radius:6px;padding:9px 14px;font-size:.72rem;
-         font-family:monospace;word-break:break-all;text-align:left;color:var(--muted);margin-bottom:16px;
-         border:1px solid var(--border)"></div>
-    <div class="modal-foot" style="justify-content:center">
-      <button class="mbtn save" id="btn-copy-url" onclick="copyShareUrl()">📋 Copiar URL</button>
-      <button class="mbtn cancel" onclick="closeShareModal()">Cerrar</button>
-    </div>
-  </div>
-</div>
-
-<!-- Firebase SDK (compat) -->
-<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
+<!-- Firebase SDK -->
+<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
 <!-- ══════════════════════════════════════════════════════ -->
 <script>
 // ── CONFIG ────────────────────────────────────────────────
@@ -672,35 +652,42 @@ function initFirebase() {
   try {
     firebase.initializeApp(FB_CONFIG);
     fbDB = firebase.firestore();
-    subscribeFB();
   } catch(e) {
-    setSyncStatus('error', 'Firebase: ' + e.message);
+    setSyncStatus('error', 'Init falló: ' + e.message);
+    return;
   }
+  subscribeFB();
 }
+
+let _connectTimeout = null;
 
 function subscribeFB() {
   if (_fbUnsub) _fbUnsub();
   setSyncStatus('connecting');
 
-  _fbUnsub = FB_REF().onSnapshot({ includeMetadataChanges: true }, snap => {
-    if (snap.metadata.hasPendingWrites) return;
+  // Si no hay respuesta en 8 s, mostramos el error
+  clearTimeout(_connectTimeout);
+  _connectTimeout = setTimeout(() => {
+    setSyncStatus('error', 'Sin respuesta — verificá las Rules en Firebase Console');
+  }, 8000);
+
+  _fbUnsub = FB_REF().onSnapshot(snap => {
+    clearTimeout(_connectTimeout);
     setSyncStatus('ok');
     if (!snap.exists) return;
 
     const d = snap.data();
     if (!Array.isArray(d?.devices)) return;
-
-    // No pisar si el usuario editó hace menos de 3 s
-    if (Date.now() - _lastEdit < 3000) return;
+    if (Date.now() - _lastEdit < 3000) return; // no pisar cambios locales recientes
 
     S.devices = d.devices;
     S.cables  = d.cables || [];
     S.seq     = d.seq    || 1;
     render(); _saveLocal();
   }, err => {
-    // Error visible con instrucción
+    clearTimeout(_connectTimeout);
     const msg = err.code === 'permission-denied'
-      ? '🔒 Reglas Firestore bloqueando — revisá Firebase Console → Firestore → Rules'
+      ? '🔒 Permiso denegado — ponete las Rules en Firestore'
       : '❌ ' + (err.code || err.message);
     setSyncStatus('error', msg);
   });
@@ -710,17 +697,12 @@ function setSyncStatus(s, customMsg) {
   const dot   = document.getElementById('sync-dot');
   const label = document.getElementById('sync-label');
   if (dot) dot.className = s;
-  const txt = {
-    ok:         'Sincronizado ✓',
-    saving:     'Guardando…',
-    connecting: 'Conectando…',
-    error:      customMsg || 'Error de conexión'
-  };
-  if (label) label.textContent = txt[s] || customMsg || s;
+  const txt = { ok:'Sincronizado ✓', saving:'Guardando…', connecting:'Conectando…' };
+  if (label) label.textContent = customMsg || txt[s] || s;
 }
 
 async function saveToFirebase() {
-  if (!fbDB) { setSyncStatus('error', 'Firebase no inicializado'); return; }
+  if (!fbDB) { setSyncStatus('error', 'Firebase no iniciado'); return; }
   setSyncStatus('saving');
   try {
     await FB_REF().set({
@@ -732,30 +714,10 @@ async function saveToFirebase() {
     setSyncStatus('ok');
   } catch(e) {
     const msg = e.code === 'permission-denied'
-      ? '🔒 Reglas Firestore — habilitá escritura en Firebase Console'
+      ? '🔒 Permiso denegado — revisá las Rules'
       : '❌ ' + (e.code || e.message);
     setSyncStatus('error', msg);
   }
-}
-
-// ── SHARE MODAL ───────────────────────────────────────────
-const APP_URL = 'https://lobosueltoPR.github.io/MapeoRS/';
-
-function openShareModal() {
-  document.getElementById('share-url-box').textContent = APP_URL;
-  document.getElementById('qr-code').src =
-    'https://api.qrserver.com/v1/create-qr-code/?size=200x200&color=e2e8f0&bgcolor=1a1d27&data=' +
-    encodeURIComponent(APP_URL);
-  document.getElementById('share-modal').classList.add('open');
-}
-function closeShareModal() {
-  document.getElementById('share-modal').classList.remove('open');
-}
-async function copyShareUrl() {
-  try {
-    await navigator.clipboard.writeText(APP_URL);
-    flashBtn('btn-copy-url', '✅ Copiado!');
-  } catch(e) { prompt('URL:', APP_URL); }
 }
 // ── BOOT ──────────────────────────────────────────────────
 (async function boot() {
@@ -1001,7 +963,6 @@ function bindEvents() {
   document.getElementById('btn-import').onclick   = () => document.getElementById('file-import-json').click();
   document.getElementById('file-import-json').onchange = importJSON;
   document.getElementById('btn-help').onclick  = () => document.getElementById('help-modal').classList.add('open');
-  document.getElementById('btn-share').onclick = openShareModal;
 
   // Paneles deslizantes (mobile)
   document.getElementById('btn-toggle-left').onclick  = () => togglePanel('left');
