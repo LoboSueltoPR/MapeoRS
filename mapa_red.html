@@ -250,13 +250,50 @@ main { display:flex; flex:1; overflow:hidden; }
 #sync-dot.ok      { background:#22c55e; }
 #sync-dot.saving  { background:#3b82f6; animation:pulse .8s infinite; }
 #sync-dot.error   { background:#ef4444; }
+
+/* ── MOBILE / RESPONSIVE ─────────────────────────── */
+.mobile-only { display:none; }
+#mobile-backdrop { display:none; }
+
+@media (max-width:768px) {
+  body { height:100dvh; }
+
+  .mobile-only { display:flex !important; }
+  .sep { display:none; }
+
+  header { height:auto; flex-wrap:wrap; padding:6px 8px; gap:5px; }
+  header h1 { width:100%; margin:0 0 2px; font-size:.82rem; text-align:center; }
+  .tbtn { padding:7px 10px; font-size:.72rem; }
+
+  .sidebar {
+    position:fixed; top:0; bottom:0; left:0; z-index:400;
+    width:82%; max-width:300px;
+    transform:translateX(-100%); transition:transform .25s ease;
+    box-shadow:0 0 30px rgba(0,0,0,.6);
+  }
+  .sidebar.right { left:auto; right:0; width:86%; max-width:320px; transform:translateX(100%); }
+  .sidebar.open { transform:translateX(0); }
+
+  #mobile-backdrop { position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:350; }
+  #mobile-backdrop.show { display:block; }
+
+  .stats { gap:12px; font-size:.66rem; padding:0 10px; }
+  .stats span:last-child { display:none; }
+
+  .modal { width:92vw; padding:18px; }
+  .modal-row { flex-direction:column; gap:0; }
+
+  .dmarker .ico { width:38px; height:38px; font-size:19px; }
+}
 </style>
 </head>
 <body>
 
 <!-- ── HEADER ──────────────────────────────────────────── -->
 <header>
+  <button class="tbtn mobile-only" id="btn-toggle-left" title="Equipos">☰</button>
   <h1>🌐 MapeoRS — Infraestructura de Red</h1>
+  <button class="tbtn mobile-only" id="btn-toggle-right" title="Detalles">ℹ️</button>
 
   <label class="tbtn" for="file-plan" title="Cargar imagen del plano" style="cursor:pointer">📁 Cargar Plano</label>
   <div class="sep"></div>
@@ -338,6 +375,9 @@ main { display:flex; flex:1; overflow:hidden; }
   </div>
 
 </main>
+
+<!-- Backdrop para paneles en mobile -->
+<div id="mobile-backdrop"></div>
 
 <!-- Stats bar -->
 <div class="stats">
@@ -535,7 +575,6 @@ main { display:flex; flex:1; overflow:hidden; }
 <!-- Firebase SDK (compat) -->
 <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
-
 <!-- ══════════════════════════════════════════════════════ -->
 <script>
 // ── CONFIG ────────────────────────────────────────────────
@@ -581,6 +620,8 @@ let S = {
   seq: 1,
   ctxId: null
 };
+
+let tempLine = null;   // cable temporal mientras se traza
 
 // ── DOM REFS ──────────────────────────────────────────────
 const mapWrap    = document.getElementById('map-wrap');
@@ -631,12 +672,13 @@ const FB_CONFIG = {
   messagingSenderId: '1047729878285',
   appId:             '1:1047729878285:web:752933c277087f5bbb6c44'
 };
+const PLAN_IMG = 'plano.png'; // plano fijo del repo (opcional)
 
 let fbDB       = null;
 let mapId      = null;
 let _fbUnsub   = null;
 let _saveTimer = null;
-let _ownWrite  = false;      // para ignorar snapshot de nuestro propio write
+let _ownWrite  = false;
 let _pendingRemote = null;
 
 function initFirebase() {
@@ -751,7 +793,6 @@ async function copyShareUrl() {
     prompt('Copiá esta URL:', url);
   }
 }
-
 // ── BOOT ──────────────────────────────────────────────────
 (async function boot() {
   buildTypeSelect();
@@ -760,12 +801,30 @@ async function copyShareUrl() {
   bindEvents();
   initFirebase();
   render();
-  // Cargar plano guardado desde IndexedDB
-  try {
-    const saved = await idbGet('plan');
-    if (saved) applyPlan(saved, false);
-  } catch(e) {}
+  // Cargar plano: primero intenta plano.png del repo, si no existe usa IndexedDB
+  loadFixedPlan();
 })();
+
+async function loadFixedPlan() {
+  floorImg.onload = () => {
+    S.planW = floorImg.naturalWidth;
+    S.planH = floorImg.naturalHeight;
+    floorImg.style.display = 'block';
+    noPlanMsg.style.display = 'none';
+    cabSvg.style.width    = S.planW + 'px';
+    cabSvg.style.height   = S.planH + 'px';
+    devLayer.style.width  = S.planW + 'px';
+    devLayer.style.height = S.planH + 'px';
+    fitPlan(); render();
+  };
+  floorImg.onerror = async () => {
+    try {
+      const saved = await idbGet('plan');
+      if (saved) applyPlan(saved, true);
+    } catch(e) {}
+  };
+  floorImg.src = PLAN_IMG + '?t=' + Date.now();
+}
 
 // ── STORAGE ───────────────────────────────────────────────
 // Guarda local Y dispara Firebase con debounce de 1.5s
@@ -905,6 +964,43 @@ function bindEvents() {
   });
   mapWrap.addEventListener('contextmenu', e => e.preventDefault());
 
+  // Touch: un dedo = pan, dos dedos = pinch zoom
+  let touch = null;
+  const tdist = (a, b) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+  mapWrap.addEventListener('touchstart', e => {
+    if (e.touches.length === 1) {
+      const t = e.touches[0];
+      touch = { mode:'pan', sx:t.clientX, sy:t.clientY, px:S.pan.x, py:S.pan.y };
+    } else if (e.touches.length === 2) {
+      touch = { mode:'pinch', d:tdist(e.touches[0], e.touches[1]) };
+    }
+  }, { passive:true });
+  mapWrap.addEventListener('touchmove', e => {
+    if (!touch) return;
+    if (touch.mode === 'pan' && e.touches.length === 1) {
+      e.preventDefault();
+      const t = e.touches[0];
+      S.pan.x = touch.px + (t.clientX - touch.sx);
+      S.pan.y = touch.py + (t.clientY - touch.sy);
+      applyTransform();
+    } else if (touch.mode === 'pinch' && e.touches.length === 2) {
+      e.preventDefault();
+      const nd = tdist(e.touches[0], e.touches[1]);
+      const r = mapWrap.getBoundingClientRect();
+      const cx = (e.touches[0].clientX + e.touches[1].clientX) / 2 - r.left;
+      const cy = (e.touches[0].clientY + e.touches[1].clientY) / 2 - r.top;
+      if (touch.d) zoomAt(cx, cy, nd / touch.d);
+      touch.d = nd;
+    }
+  }, { passive:false });
+  mapWrap.addEventListener('touchend', e => {
+    if (e.touches.length === 0) touch = null;
+    else if (e.touches.length === 1) {
+      const t = e.touches[0];
+      touch = { mode:'pan', sx:t.clientX, sy:t.clientY, px:S.pan.x, py:S.pan.y };
+    }
+  }, { passive:true });
+
   // Click on map (add device)
   mapWrap.addEventListener('click', e => {
     if (S.panning) return;
@@ -942,6 +1038,11 @@ function bindEvents() {
   document.getElementById('file-import-json').onchange = importJSON;
   document.getElementById('btn-help').onclick  = () => document.getElementById('help-modal').classList.add('open');
   document.getElementById('btn-share').onclick = openShareModal;
+
+  // Paneles deslizantes (mobile)
+  document.getElementById('btn-toggle-left').onclick  = () => togglePanel('left');
+  document.getElementById('btn-toggle-right').onclick = () => togglePanel('right');
+  document.getElementById('mobile-backdrop').onclick  = closePanels;
 
   // Search
   document.getElementById('dev-search').oninput = renderDevList;
@@ -1112,7 +1213,6 @@ function deleteCable(id) {
 }
 
 // ── TEMP CABLE ───────────────────────────────────────────
-let tempLine = null;
 function renderTempCable(pos) {
   if (!S.cabStart) return;
   const d = S.devices.find(x => x.id === S.cabStart);
@@ -1290,6 +1390,7 @@ function select(id) {
   renderDevMarkers();
   renderDevList();
   renderDetail(id);
+  if (isMobile() && id) openPanel('right');
 }
 
 function renderDetail(id) {
@@ -1439,6 +1540,25 @@ function panTo(d) {
 
 // ── CTX MENU ──────────────────────────────────────────────
 function closeCtx() { ctxMenu.classList.remove('open'); }
+
+// ── PANELES MOBILE ────────────────────────────────────────
+const isMobile = () => window.matchMedia('(max-width:768px)').matches;
+const _backdrop = document.getElementById('mobile-backdrop');
+function closePanels() {
+  document.getElementById('sidebar-left').classList.remove('open');
+  document.getElementById('sidebar-right').classList.remove('open');
+  _backdrop.classList.remove('show');
+}
+function openPanel(side) {
+  closePanels();
+  document.getElementById('sidebar-' + side).classList.add('open');
+  _backdrop.classList.add('show');
+}
+function togglePanel(side) {
+  const el = document.getElementById('sidebar-' + side);
+  if (el.classList.contains('open')) closePanels();
+  else openPanel(side);
+}
 
 // ── EXPORT / IMPORT ───────────────────────────────────────
 function exportJSON() {
