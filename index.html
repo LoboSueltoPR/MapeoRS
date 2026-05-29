@@ -550,26 +550,13 @@ main { display:flex; flex:1; overflow:hidden; }
     </p>
     <img id="qr-code" src="" width="200" height="200" style="border-radius:8px;margin-bottom:14px;background:#fff;padding:6px">
     <div id="share-url-box" style="background:var(--bg);border-radius:6px;padding:9px 14px;font-size:.72rem;
-         font-family:monospace;word-break:break-all;text-align:left;color:var(--muted);margin-bottom:4px;
+         font-family:monospace;word-break:break-all;text-align:left;color:var(--muted);margin-bottom:16px;
          border:1px solid var(--border)"></div>
-    <div style="font-size:.72rem;color:var(--muted);margin-bottom:14px">
-      ID del mapa: <b id="map-id-display" style="color:var(--text)"></b>
-    </div>
     <div class="modal-foot" style="justify-content:center">
       <button class="mbtn save" id="btn-copy-url" onclick="copyShareUrl()">📋 Copiar URL</button>
       <button class="mbtn cancel" onclick="closeShareModal()">Cerrar</button>
     </div>
   </div>
-</div>
-
-<!-- ── REMOTE DATA BANNER ────────────────────────────────── -->
-<div id="gh-banner" style="display:none;position:fixed;top:62px;left:50%;transform:translateX(-50%);
-    background:var(--surface);border:1px solid var(--accent);border-radius:8px;
-    padding:9px 16px;z-index:300;font-size:.8rem;align-items:center;gap:12px;
-    white-space:nowrap;box-shadow:0 4px 20px rgba(0,0,0,.4)">
-  ☁️ Hay datos más recientes en Firebase — <span id="gh-banner-date" style="color:var(--muted)"></span>
-  <button class="tbtn" style="padding:4px 12px;font-size:.75rem" onclick="applyGHData()">⬇️ Cargar</button>
-  <button style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:1rem;line-height:1" onclick="document.getElementById('gh-banner').style.display='none'">✕</button>
 </div>
 
 <!-- Firebase SDK (compat) -->
@@ -675,123 +662,85 @@ const FB_CONFIG = {
 const PLAN_IMG = 'plano.png'; // plano fijo del repo (opcional)
 
 let fbDB       = null;
-let mapId      = null;
 let _fbUnsub   = null;
 let _saveTimer = null;
-let _ownWrite  = false;
-let _pendingRemote = null;
+let _lastEdit  = 0;   // timestamp del último cambio local
+
+const FB_REF = () => fbDB.collection('maps').doc('shared');
 
 function initFirebase() {
   firebase.initializeApp(FB_CONFIG);
   fbDB = firebase.firestore();
 
-  // Obtener mapId: primero URL param (?map=xxx), luego localStorage, sino generar
-  const urlParam = new URLSearchParams(location.search).get('map');
-  mapId = urlParam || localStorage.getItem('mapeoRS_mapId') || genMapId();
-  localStorage.setItem('mapeoRS_mapId', mapId);
-
-  // Si vino por URL, limpiarla sin recargar
-  if (urlParam) history.replaceState({}, '', location.pathname);
+  // Persistencia offline: funciona sin internet y sincroniza al volver
+  fbDB.enablePersistence({ synchronizeTabs: true }).catch(() => {});
 
   subscribeFB();
-}
-
-function genMapId() {
-  return Math.random().toString(36).slice(2, 8) +
-         Math.random().toString(36).slice(2, 8);
 }
 
 function subscribeFB() {
   if (_fbUnsub) _fbUnsub();
   setSyncStatus('connecting');
 
-  _fbUnsub = fbDB.collection('maps').doc(mapId)
-    .onSnapshot({ includeMetadataChanges: true }, snap => {
-      // Ignorar escrituras pendientes locales (evita loop)
-      if (snap.metadata.hasPendingWrites) return;
-      setSyncStatus('ok');
+  _fbUnsub = FB_REF().onSnapshot({ includeMetadataChanges: true }, snap => {
+    // Ignorar mientras hay escrituras locales pendientes (evita loop)
+    if (snap.metadata.hasPendingWrites) return;
+    setSyncStatus('ok');
+    if (!snap.exists) return;
 
-      if (!snap.exists) return;
-      if (_ownWrite) { _ownWrite = false; return; } // era nuestro propio guardado
+    const d = snap.data();
+    if (!Array.isArray(d?.devices)) return;
 
-      const data = snap.data();
-      if (!Array.isArray(data.devices)) return;
+    // Si el usuario editó en los últimos 3 s, no pisamos sus cambios aún
+    if (Date.now() - _lastEdit < 3000) return;
 
-      const noLocal = S.devices.length === 0 && S.cables.length === 0;
-      if (noLocal) {
-        // Sin datos locales → cargar silenciosamente
-        S.devices = data.devices;
-        S.cables  = data.cables  || [];
-        S.seq     = data.seq     || 1;
-        render(); _saveLocal();
-      } else {
-        // Hay datos locales → mostrar banner para decidir
-        _pendingRemote = data;
-        const ts = data.updatedAt?.toDate?.();
-        document.getElementById('gh-banner-date').textContent =
-          ts ? ts.toLocaleString('es-AR') : 'versión remota';
-        document.getElementById('gh-banner').style.display = 'flex';
-      }
-    }, () => setSyncStatus('error'));
+    S.devices = d.devices;
+    S.cables  = d.cables || [];
+    S.seq     = d.seq    || 1;
+    render(); _saveLocal();
+  }, () => setSyncStatus('error'));
 }
 
 function setSyncStatus(s) {
   const dot   = document.getElementById('sync-dot');
   const label = document.getElementById('sync-label');
-  dot.className = s;
-  const labels = { ok:'Sincronizado', saving:'Guardando…', connecting:'Conectando…', error:'Sin conexión' };
-  if (label) label.textContent = labels[s] || s;
+  if (dot)   dot.className = s;
+  const txt = { ok:'Sincronizado', saving:'Guardando…', connecting:'Conectando…', error:'Sin conexión' };
+  if (label) label.textContent = txt[s] || s;
 }
 
 async function saveToFirebase() {
-  if (!fbDB || !mapId) return;
+  if (!fbDB) return;
   setSyncStatus('saving');
-  _ownWrite = true;
   try {
-    await fbDB.collection('maps').doc(mapId).set({
+    await FB_REF().set({
       devices:   S.devices,
       cables:    S.cables,
       seq:       S.seq,
       updatedAt: firebase.firestore.FieldValue.serverTimestamp()
     });
     setSyncStatus('ok');
-  } catch(e) {
-    _ownWrite = false;
-    setSyncStatus('error');
-  }
-}
-
-function applyGHData() {
-  if (!_pendingRemote) return;
-  S.devices = _pendingRemote.devices || [];
-  S.cables  = _pendingRemote.cables  || [];
-  S.seq     = _pendingRemote.seq     || 1;
-  _pendingRemote = null;
-  document.getElementById('gh-banner').style.display = 'none';
-  render(); _saveLocal();
+  } catch(e) { setSyncStatus('error'); }
 }
 
 // ── SHARE MODAL ───────────────────────────────────────────
+const APP_URL = 'https://lobosueltoPR.github.io/MapeoRS/';
+
 function openShareModal() {
-  const url = location.origin + location.pathname + '?map=' + mapId;
-  document.getElementById('share-url-box').textContent = url;
-  document.getElementById('map-id-display').textContent = mapId;
+  document.getElementById('share-url-box').textContent = APP_URL;
   document.getElementById('qr-code').src =
     'https://api.qrserver.com/v1/create-qr-code/?size=200x200&color=e2e8f0&bgcolor=1a1d27&data=' +
-    encodeURIComponent(url);
+    encodeURIComponent(APP_URL);
   document.getElementById('share-modal').classList.add('open');
 }
 function closeShareModal() {
   document.getElementById('share-modal').classList.remove('open');
 }
 async function copyShareUrl() {
-  const url = location.origin + location.pathname + '?map=' + mapId;
   try {
-    await navigator.clipboard.writeText(url);
+    await navigator.clipboard.writeText(APP_URL);
     flashBtn('btn-copy-url', '✅ Copiado!');
-  } catch(e) {
-    prompt('Copiá esta URL:', url);
-  }
+  } catch(e) { prompt('URL:', APP_URL); }
 }
 // ── BOOT ──────────────────────────────────────────────────
 (async function boot() {
@@ -827,11 +776,11 @@ async function loadFixedPlan() {
 }
 
 // ── STORAGE ───────────────────────────────────────────────
-// Guarda local Y dispara Firebase con debounce de 1.5s
 function saveStorage() {
+  _lastEdit = Date.now();          // marca el tiempo del cambio local
   _saveLocal();
   clearTimeout(_saveTimer);
-  _saveTimer = setTimeout(saveToFirebase, 1500);
+  _saveTimer = setTimeout(saveToFirebase, 1500); // debounce → guarda en Firebase
 }
 
 function _saveLocal() {
