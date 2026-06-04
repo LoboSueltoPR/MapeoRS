@@ -299,6 +299,7 @@ main { display:flex; flex:1; overflow:hidden; }
   <div class="sep"></div>
   <button class="tbtn" id="btn-add-dev" title="Clic en el mapa para agregar equipo">➕ Agregar Equipo</button>
   <button class="tbtn" id="btn-add-cab" title="Clic en dos equipos para conectar">🔗 Trazar Cable</button>
+  <button class="tbtn" id="btn-add-area" title="Arrastrá en el mapa para dibujar un sector">📍 Área</button>
   <div class="sep"></div>
   <button class="tbtn success" id="btn-save">💾 Guardar</button>
   <button class="tbtn" id="btn-export" title="Exportar como JSON">📤 Exportar</button>
@@ -348,7 +349,8 @@ main { display:flex; flex:1; overflow:hidden; }
 
     <div class="map-vp" id="map-vp">
       <img id="floor-img" class="floor-img" style="display:none" draggable="false">
-      <svg id="cables-svg" class="cables-svg" style="position:absolute;top:0;left:0;overflow:visible;pointer-events:none;"></svg>
+      <svg id="areas-svg"  style="position:absolute;top:0;left:0;overflow:visible;pointer-events:none;"></svg>
+      <svg id="cables-svg" style="position:absolute;top:0;left:0;overflow:visible;pointer-events:none;"></svg>
       <div id="dev-layer" class="dev-layer" style="pointer-events:none;"></div>
     </div>
 
@@ -539,6 +541,26 @@ main { display:flex; flex:1; overflow:hidden; }
   </div>
 </div>
 
+<!-- ── AREA MODAL ──────────────────────────────────────────── -->
+<div class="modal-bg" id="area-modal">
+  <div class="modal" style="width:340px">
+    <h2 id="area-modal-title">📍 Nombrar Área</h2>
+    <div class="fgroup">
+      <label>Nombre del sector</label>
+      <input type="text" id="a-name" placeholder="Sala de Servidores, Recepción, Oficina…">
+    </div>
+    <div class="fgroup">
+      <label>Color</label>
+      <div id="a-color-swatches" style="display:flex;gap:8px;flex-wrap:wrap;padding:4px 0"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="mbtn cancel" id="a-btn-del" style="display:none;border-color:var(--danger);color:var(--danger)" onclick="deleteAreaFromModal()">🗑️ Eliminar</button>
+      <button class="mbtn cancel" onclick="closeAreaModal()">Cancelar</button>
+      <button class="mbtn save" onclick="saveArea()">Guardar</button>
+    </div>
+  </div>
+</div>
+
 <!-- Firebase SDK -->
 <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
@@ -568,18 +590,23 @@ const CABLE_TYPES = {
   serial: { label:'Serial',       color:'#a78bfa', dash:'1,4' }
 };
 
+const AREA_COLORS = ['#3b82f6','#22c55e','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#f97316','#ec4899','#94a3b8'];
+
 // ── STATE ─────────────────────────────────────────────────
 let S = {
   devices: [],
   cables: [],
-  plan: null,         // base64 image
+  areas: [],
+  plan: null,
   planW: 0, planH: 0,
-  mode: 'sel',        // sel | add | cable
-  sel: null,          // selected device id
-  cabStart: null,     // first device for cable
-  pendingPos: null,   // position for new device
-  pendingCab: null,   // {from, to} for new cable
+  mode: 'sel',        // sel | add | cable | area
+  sel: null,
+  cabStart: null,
+  pendingPos: null,
+  pendingCab: null,
+  pendingArea: null,  // área en construcción
   editId: null,
+  editAreaId: null,
   zoom: 1,
   pan: { x: 0, y: 0 },
   panning: false,
@@ -588,12 +615,17 @@ let S = {
   ctxId: null
 };
 
+// variables de dibujo de área
+let _areaDraw   = null;   // { x0, y0 } punto de inicio
+let _areaPreviewRect = null; // elemento SVG temporal
+
 let tempLine = null;   // cable temporal mientras se traza
 
 // ── DOM REFS ──────────────────────────────────────────────
 const mapWrap    = document.getElementById('map-wrap');
 const mapVp      = document.getElementById('map-vp');
 const floorImg   = document.getElementById('floor-img');
+const areasSvg   = document.getElementById('areas-svg');
 const cabSvg     = document.getElementById('cables-svg');
 const devLayer   = document.getElementById('dev-layer');
 const noPlanMsg  = document.getElementById('no-plan-msg');
@@ -682,6 +714,7 @@ function subscribeFB() {
 
     S.devices = d.devices;
     S.cables  = d.cables || [];
+    S.areas   = d.areas  || [];
     S.seq     = d.seq    || 1;
     render(); _saveLocal();
   }, err => {
@@ -708,6 +741,7 @@ async function saveToFirebase() {
     await FB_REF().set({
       devices:   S.devices,
       cables:    S.cables,
+      areas:     S.areas,
       seq:       S.seq,
       updatedAt: firebase.firestore.FieldValue.serverTimestamp()
     });
@@ -739,6 +773,8 @@ async function loadFixedPlan() {
     noPlanMsg.style.display = 'none';
     cabSvg.style.width    = S.planW + 'px';
     cabSvg.style.height   = S.planH + 'px';
+    areasSvg.style.width  = S.planW + 'px';
+    areasSvg.style.height = S.planH + 'px';
     devLayer.style.width  = S.planW + 'px';
     devLayer.style.height = S.planH + 'px';
     fitPlan(); render();
@@ -763,7 +799,7 @@ function saveStorage() {
 function _saveLocal() {
   try {
     localStorage.setItem('mapeoRS', JSON.stringify({
-      devices: S.devices, cables: S.cables, seq: S.seq
+      devices: S.devices, cables: S.cables, areas: S.areas, seq: S.seq
     }));
   } catch(e) {}
 }
@@ -775,6 +811,7 @@ function loadStorage() {
     const d = JSON.parse(raw);
     S.devices = d.devices || [];
     S.cables  = d.cables  || [];
+    S.areas   = d.areas   || [];
     S.seq     = d.seq     || 1;
   } catch(e) {}
 }
@@ -803,6 +840,8 @@ function applyPlan(src, resetPan) {
     noPlanMsg.style.display = 'none';
     cabSvg.style.width    = S.planW + 'px';
     cabSvg.style.height   = S.planH + 'px';
+    areasSvg.style.width  = S.planW + 'px';
+    areasSvg.style.height = S.planH + 'px';
     devLayer.style.width  = S.planW + 'px';
     devLayer.style.height = S.planH + 'px';
     if (resetPan) fitPlan();
@@ -863,13 +902,18 @@ function bindEvents() {
     zoomAt(e.clientX - r.left, e.clientY - r.top, e.deltaY < 0 ? 1.12 : 0.9);
   }, { passive: false });
 
-  // Pan (right-click drag or ctrl+drag)
+  // Pan (right-click drag or ctrl+drag) + area drawing (left btn in area mode)
   mapWrap.addEventListener('mousedown', e => {
     if (e.button === 2 || (e.button === 0 && e.ctrlKey)) {
       e.preventDefault();
       S.panning = true;
       S.panOrigin = { x: e.clientX - S.pan.x, y: e.clientY - S.pan.y };
       mapWrap.style.cursor = 'grabbing';
+      return;
+    }
+    if (e.button === 0 && S.mode === 'area') {
+      e.preventDefault();
+      _areaDraw = mapCoords(e);
     }
   });
   document.addEventListener('mousemove', e => {
@@ -878,14 +922,23 @@ function bindEvents() {
       S.pan.y = e.clientY - S.panOrigin.y;
       applyTransform();
     }
-    if (S.mode === 'cable' && S.cabStart) {
-      renderTempCable(mapCoords(e));
-    }
+    if (S.mode === 'cable' && S.cabStart) renderTempCable(mapCoords(e));
+    if (S.mode === 'area' && _areaDraw) updateAreaPreview(_areaDraw, mapCoords(e));
   });
   document.addEventListener('mouseup', e => {
     if (S.panning) {
       S.panning = false;
-      mapWrap.style.cursor = '';
+      mapWrap.style.cursor = S.mode === 'area' ? 'crosshair' : '';
+    }
+    if (e.button === 0 && S.mode === 'area' && _areaDraw) {
+      const end = mapCoords(e);
+      const rect = normalizeRect(_areaDraw, end);
+      _areaDraw = null;
+      clearAreaPreview();
+      if (rect.w > 20 && rect.h > 20) {
+        S.pendingArea = rect;
+        openAreaModal();
+      }
     }
   });
   mapWrap.addEventListener('contextmenu', e => e.preventDefault());
@@ -956,8 +1009,9 @@ function bindEvents() {
   });
 
   // Toolbar
-  document.getElementById('btn-add-dev').onclick  = () => setMode('add');
-  document.getElementById('btn-add-cab').onclick  = () => setMode('cable');
+  document.getElementById('btn-add-dev').onclick   = () => setMode('add');
+  document.getElementById('btn-add-cab').onclick   = () => setMode('cable');
+  document.getElementById('btn-add-area').onclick  = () => setMode('area');
   document.getElementById('btn-save').onclick     = () => { saveStorage(); flashBtn('btn-save', '✅ Guardado'); };
   document.getElementById('btn-export').onclick   = exportJSON;
   document.getElementById('btn-import').onclick   = () => document.getElementById('file-import-json').click();
@@ -986,8 +1040,15 @@ function bindEvents() {
 function setMode(m) {
   S.mode = m;
   S.cabStart = null;
+  _areaDraw = null;
+  clearAreaPreview();
   clearTempCable();
-  const labels = { sel:'Selección', add:'Agregar Equipo — clic en el plano', cable:'Cable — clic en equipo origen' };
+  const labels = {
+    sel:   'Selección',
+    add:   'Agregar Equipo — clic en el plano',
+    cable: 'Cable — clic en equipo origen',
+    area:  'Área — arrastrá para dibujar el sector'
+  };
   document.getElementById('s-mode').innerHTML = `Modo: <b>${labels[m]||m}</b>`;
   if (m === 'sel') {
     modeBar.classList.remove('show');
@@ -995,18 +1056,22 @@ function setMode(m) {
   } else {
     modeBar.textContent = m === 'add'
       ? '➕ Clic en el plano para ubicar el equipo — ESC para cancelar'
-      : '🔗 Clic en el equipo ORIGEN — ESC para cancelar';
+      : m === 'area'
+        ? '📍 Clic y arrastrá para dibujar el sector — ESC para cancelar'
+        : '🔗 Clic en el equipo ORIGEN — ESC para cancelar';
     modeBar.classList.add('show');
-    mapWrap.style.cursor = m === 'add' ? 'crosshair' : 'default';
+    mapWrap.style.cursor = (m === 'add' || m === 'area') ? 'crosshair' : 'default';
   }
   document.getElementById('btn-add-dev').classList.toggle('active', m === 'add');
   document.getElementById('btn-add-cab').classList.toggle('active', m === 'cable');
+  document.getElementById('btn-add-area').classList.toggle('active', m === 'area');
 }
 
 function cancelMode() {
-  S.cabStart = null; clearTempCable();
+  S.cabStart = null; _areaDraw = null;
+  clearAreaPreview(); clearTempCable();
   setMode('sel');
-  closeDevModal(); closeCabModal();
+  closeDevModal(); closeCabModal(); closeAreaModal();
 }
 
 // ── DEVICE MODAL ──────────────────────────────────────────
@@ -1152,8 +1217,136 @@ function clearTempCable() {
   if (tempLine) { cabSvg.removeChild(tempLine); tempLine = null; }
 }
 
+// ── AREAS ────────────────────────────────────────────────
+function normalizeRect(a, b) {
+  return { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y),
+           w: Math.abs(a.x - b.x), h: Math.abs(a.y - b.y) };
+}
+
+function updateAreaPreview(start, cur) {
+  clearAreaPreview();
+  const r = normalizeRect(start, cur);
+  const el = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+  el.setAttribute('x', r.x); el.setAttribute('y', r.y);
+  el.setAttribute('width', r.w); el.setAttribute('height', r.h);
+  el.setAttribute('fill', 'none');
+  el.setAttribute('stroke', '#4f8ef7');
+  el.setAttribute('stroke-width', '2');
+  el.setAttribute('stroke-dasharray', '6,3');
+  el.setAttribute('rx', '4');
+  el.setAttribute('pointer-events', 'none');
+  areasSvg.appendChild(el);
+  _areaPreviewRect = el;
+}
+
+function clearAreaPreview() {
+  if (_areaPreviewRect) { _areaPreviewRect.remove(); _areaPreviewRect = null; }
+}
+
+function renderAreas() {
+  // Limpiar solo los elementos de área (no el preview)
+  Array.from(areasSvg.children).forEach(c => {
+    if (c !== _areaPreviewRect) c.remove();
+  });
+
+  for (const a of S.areas) {
+    const color = a.color || '#3b82f6';
+    const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    g.style.cursor = 'pointer';
+    g.addEventListener('click', e => { e.stopPropagation(); openAreaModal(a.id); });
+
+    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    rect.setAttribute('x', a.x); rect.setAttribute('y', a.y);
+    rect.setAttribute('width', a.w); rect.setAttribute('height', a.h);
+    rect.setAttribute('fill', color); rect.setAttribute('fill-opacity', '0.1');
+    rect.setAttribute('stroke', color); rect.setAttribute('stroke-width', '1.5');
+    rect.setAttribute('stroke-dasharray', '7,4'); rect.setAttribute('rx', '5');
+
+    // Fondo semitransparente para el texto
+    const labelBg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    labelBg.setAttribute('x', a.x + 6); labelBg.setAttribute('y', a.y + 5);
+    labelBg.setAttribute('width', Math.min(a.w - 12, a.name.length * 8 + 10));
+    labelBg.setAttribute('height', '20');
+    labelBg.setAttribute('fill', color); labelBg.setAttribute('fill-opacity', '0.25');
+    labelBg.setAttribute('rx', '3');
+
+    const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    text.setAttribute('x', a.x + 11); text.setAttribute('y', a.y + 19);
+    text.setAttribute('fill', color); text.setAttribute('font-size', '12');
+    text.setAttribute('font-weight', '700');
+    text.setAttribute('font-family', 'Segoe UI, system-ui, sans-serif');
+    text.setAttribute('pointer-events', 'none');
+    text.textContent = a.name;
+
+    g.appendChild(rect); g.appendChild(labelBg); g.appendChild(text);
+    areasSvg.insertBefore(g, _areaPreviewRect);
+  }
+
+  // Dimensionar areas-svg igual que cables-svg
+  areasSvg.style.width  = cabSvg.style.width;
+  areasSvg.style.height = cabSvg.style.height;
+}
+
+let _selectedAreaColor = AREA_COLORS[0];
+
+function buildAreaColorSwatches() {
+  const wrap = document.getElementById('a-color-swatches');
+  wrap.innerHTML = '';
+  for (const c of AREA_COLORS) {
+    const btn = document.createElement('button');
+    btn.style.cssText = `width:28px;height:28px;border-radius:50%;background:${c};border:3px solid transparent;cursor:pointer;transition:.15s`;
+    btn.onclick = () => {
+      _selectedAreaColor = c;
+      wrap.querySelectorAll('button').forEach(b => b.style.borderColor = 'transparent');
+      btn.style.borderColor = '#fff';
+    };
+    if (c === _selectedAreaColor) btn.style.borderColor = '#fff';
+    wrap.appendChild(btn);
+  }
+}
+
+function openAreaModal(id) {
+  S.editAreaId = id || null;
+  document.getElementById('area-modal-title').textContent = id ? '✏️ Editar Área' : '📍 Nombrar Área';
+  document.getElementById('a-btn-del').style.display = id ? '' : 'none';
+
+  const a = id ? S.areas.find(x => x.id === id) : null;
+  document.getElementById('a-name').value = a?.name || '';
+  _selectedAreaColor = a?.color || AREA_COLORS[0];
+
+  buildAreaColorSwatches();
+  document.getElementById('area-modal').classList.add('open');
+  setTimeout(() => document.getElementById('a-name').focus(), 50);
+}
+
+function closeAreaModal() {
+  document.getElementById('area-modal').classList.remove('open');
+  S.pendingArea = null; S.editAreaId = null;
+}
+
+function saveArea() {
+  const name = document.getElementById('a-name').value.trim() || 'Sector';
+  if (S.editAreaId) {
+    const a = S.areas.find(x => x.id === S.editAreaId);
+    if (a) { a.name = name; a.color = _selectedAreaColor; }
+  } else if (S.pendingArea) {
+    S.areas.push({ id: 'A' + (S.seq++), name, color: _selectedAreaColor, ...S.pendingArea });
+  }
+  closeAreaModal();
+  render(); saveStorage();
+}
+
+function deleteAreaFromModal() {
+  if (!S.editAreaId) return;
+  if (!confirm('¿Eliminar esta área?')) return;
+  S.areas = S.areas.filter(a => a.id !== S.editAreaId);
+  closeAreaModal();
+  render(); saveStorage();
+}
+
 // ── RENDER ────────────────────────────────────────────────
 function render() {
+  renderAreas();
   renderDevMarkers();
   renderCables();
   renderDevList();
