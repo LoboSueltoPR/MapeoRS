@@ -326,10 +326,16 @@ main { display:flex; flex:1; overflow:hidden; }
     </div>
     <div class="device-list" id="dev-list"></div>
 
+    <!-- Area list -->
+    <div class="cable-section">
+      <div class="sb-head">Áreas (<span id="cnt-area">0</span>)</div>
+      <div id="area-list-wrap" style="max-height:140px;overflow-y:auto;padding:4px;"></div>
+    </div>
+
     <!-- Cable list -->
     <div class="cable-section">
-      <div class="sb-head" id="cables-toggle">Cables (<span id="cnt-cab">0</span>) ▾</div>
-      <div id="cable-list-wrap" style="max-height:160px; overflow-y:auto; padding:4px;"></div>
+      <div class="sb-head">Cables (<span id="cnt-cab">0</span>)</div>
+      <div id="cable-list-wrap" style="max-height:140px;overflow-y:auto;padding:4px;"></div>
     </div>
 
     <!-- Legend -->
@@ -1146,10 +1152,11 @@ function deleteDevice(id) {
 
 // ── CABLE ─────────────────────────────────────────────────
 function startCable(id) {
-  S.cabStart = id;
-  setMode('cable');
+  if (S.mode !== 'cable') setMode('cable'); // setMode resetea cabStart, por eso va ANTES
+  S.cabStart = id;                          // asignar DESPUÉS de setMode
   modeBar.textContent = '🔗 Ahora clic en el equipo DESTINO — ESC para cancelar';
-  renderDevMarkers(); // update highlight
+  modeBar.classList.add('show');
+  renderDevMarkers();
 }
 
 function finishCable(toId) {
@@ -1347,6 +1354,7 @@ function render() {
   renderCables();
   renderDevList();
   renderCableList();
+  renderAreaList();
   renderDetail(S.sel);
   document.getElementById('cnt-dev').textContent = S.devices.length;
   document.getElementById('cnt-cab').textContent = S.cables.length;
@@ -1484,6 +1492,24 @@ function renderCableList() {
     el.style.cssText = `padding:5px 8px;margin:2px 0;border-radius:4px;font-size:.72rem;cursor:pointer;border-left:3px solid ${CT.color};padding-left:8px;background:var(--bg)`;
     el.innerHTML = `<span style="color:${CT.color}">${CT.label}</span> · ${esc(f?.name||'?')} ↔ ${esc(t?.name||'?')}`;
     el.onclick = () => showCableDetail(c);
+    wrap.appendChild(el);
+  }
+}
+
+function renderAreaList() {
+  const wrap = document.getElementById('area-list-wrap');
+  wrap.innerHTML = '';
+  document.getElementById('cnt-area').textContent = S.areas.length;
+  for (const a of S.areas) {
+    const el = document.createElement('div');
+    el.style.cssText = `padding:5px 8px;margin:2px 0;border-radius:4px;font-size:.75rem;
+      cursor:pointer;border-left:3px solid ${a.color};padding-left:8px;background:var(--bg);
+      display:flex;align-items:center;gap:8px;transition:opacity .15s;`;
+    el.innerHTML = `
+      <span style="width:10px;height:10px;border-radius:50%;background:${a.color};flex-shrink:0;display:inline-block"></span>
+      <span style="flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(a.name)}</span>
+      <span style="color:var(--muted);font-size:.68rem">✏️</span>`;
+    el.onclick = () => openAreaModal(a.id);
     wrap.appendChild(el);
   }
 }
