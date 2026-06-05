@@ -301,6 +301,8 @@ main { display:flex; flex:1; overflow:hidden; }
   <div class="sep"></div>
   <button class="tbtn success" id="btn-save">💾 Guardar</button>
   <button class="tbtn" id="btn-export" title="Exportar JSON de respaldo">📤 Exportar</button>
+  <label class="tbtn" for="file-import-json" style="cursor:pointer" title="Importar JSON">📥 Importar</label>
+  <input type="file" id="file-import-json" accept=".json" style="display:none">
   <div class="sep"></div>
   <div class="sync-indicator">
     <span id="sync-dot"></span>
@@ -975,6 +977,24 @@ function bindEvents() {
     await saveToFirebase();
   };
   document.getElementById('btn-export').onclick   = exportJSON;
+  document.getElementById('file-import-json').onchange = function() {
+    const f = this.files[0]; if (!f) return;
+    const r = new FileReader();
+    r.onload = ev => {
+      try {
+        const d = JSON.parse(ev.target.result);
+        if (!confirm('¿Importar? Esto reemplaza los datos actuales.')) return;
+        S.devices = d.devices || [];
+        S.cables  = d.cables  || [];
+        S.areas   = d.areas   || [];
+        S.seq     = d.seq     || 1;
+        render(); _saveLocal();
+        setSyncStatus('ok', 'Importado — presioná Guardar para subir a Firebase');
+      } catch { alert('Archivo JSON inválido.'); }
+    };
+    r.readAsText(f);
+    this.value = '';
+  };
 
   // Paneles deslizantes (mobile)
   document.getElementById('btn-toggle-left').onclick  = () => togglePanel('left');
