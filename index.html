@@ -295,24 +295,17 @@ main { display:flex; flex:1; overflow:hidden; }
   <h1>🌐 MapeoRS — Infraestructura de Red</h1>
   <button class="tbtn mobile-only" id="btn-toggle-right" title="Detalles">ℹ️</button>
 
-  <label class="tbtn" for="file-plan" title="Cargar imagen del plano" style="cursor:pointer">📁 Cargar Plano</label>
-  <div class="sep"></div>
-  <button class="tbtn" id="btn-add-dev" title="Clic en el mapa para agregar equipo">➕ Agregar Equipo</button>
-  <button class="tbtn" id="btn-add-cab" title="Clic en dos equipos para conectar">🔗 Trazar Cable</button>
-  <button class="tbtn" id="btn-add-area" title="Arrastrá en el mapa para dibujar un sector">📍 Área</button>
+  <button class="tbtn" id="btn-add-dev" title="Clic en el mapa para agregar equipo">➕ Equipo</button>
+  <button class="tbtn" id="btn-add-cab" title="Clic en dos equipos para conectar">🔗 Cable</button>
+  <button class="tbtn" id="btn-add-area" title="Arrastrá para dibujar un sector">📍 Área</button>
   <div class="sep"></div>
   <button class="tbtn success" id="btn-save">💾 Guardar</button>
-  <button class="tbtn" id="btn-export" title="Exportar como JSON">📤 Exportar</button>
-  <button class="tbtn" id="btn-import" title="Importar JSON">📥 Importar</button>
+  <button class="tbtn" id="btn-export" title="Exportar JSON de respaldo">📤 Exportar</button>
   <div class="sep"></div>
   <div class="sync-indicator">
     <span id="sync-dot"></span>
-    <span id="sync-label">Conectando…</span>
+    <span id="sync-label">Cargando…</span>
   </div>
-  <button class="tbtn" id="btn-help" title="Atajos de teclado">❓ Ayuda</button>
-
-  <input type="file" id="file-plan" accept="image/*" style="display:none">
-  <input type="file" id="file-import-json" accept=".json" style="display:none">
 </header>
 
 <!-- ── MAIN ────────────────────────────────────────────── -->
@@ -523,29 +516,6 @@ main { display:flex; flex:1; overflow:hidden; }
   </div>
 </div>
 
-<!-- ── HELP MODAL ───────────────────────────────────────── -->
-<div class="modal-bg" id="help-modal">
-  <div class="modal" style="width:400px">
-    <h2>⌨️ Atajos & Ayuda</h2>
-    <table style="width:100%; font-size:.8rem; border-collapse:collapse;">
-      <tr><td style="padding:5px 0; color:var(--muted); width:140px">ESC</td><td>Cancelar modo actual</td></tr>
-      <tr><td style="padding:5px 0; color:var(--muted)">DEL / Supr</td><td>Eliminar equipo seleccionado</td></tr>
-      <tr><td style="padding:5px 0; color:var(--muted)">Rueda del mouse</td><td>Zoom in/out</td></tr>
-      <tr><td style="padding:5px 0; color:var(--muted)">Clic derecho + arrastrar</td><td>Mover el mapa (pan)</td></tr>
-      <tr><td style="padding:5px 0; color:var(--muted)">Ctrl + arrastrar mapa</td><td>Pan alternativo</td></tr>
-      <tr><td style="padding:5px 0; color:var(--muted)">Arrastrar equipo</td><td>Reposicionar en el mapa</td></tr>
-      <tr><td style="padding:5px 0; color:var(--muted)">Clic derecho equipo</td><td>Menú contextual</td></tr>
-      <tr><td style="padding:5px 0; color:var(--muted)">Doble clic equipo</td><td>Editar equipo</td></tr>
-    </table>
-    <div style="margin-top:14px; padding:10px; background:var(--bg); border-radius:6px; font-size:.75rem; color:var(--muted);">
-      💾 Los datos se guardan automáticamente en el navegador (localStorage).<br>
-      Usá Exportar/Importar JSON para hacer backups o compartir el plano.
-    </div>
-    <div class="modal-foot">
-      <button class="mbtn save" onclick="closeHelp()">Cerrar</button>
-    </div>
-  </div>
-</div>
 
 <!-- ── AREA MODAL ──────────────────────────────────────────── -->
 <div class="modal-bg" id="area-modal">
@@ -816,19 +786,8 @@ function loadStorage() {
 }
 
 // ── FLOOR PLAN ────────────────────────────────────────────
-document.getElementById('file-plan').onchange = function() {
-  const f = this.files[0]; if (!f) return;
-  // createObjectURL: display inmediato sin race condition
-  const objUrl = URL.createObjectURL(f);
-  applyPlan(objUrl, true);
-  // Guardar en IndexedDB para persistencia entre sesiones
-  const r = new FileReader();
-  r.onload = async ev => {
-    try { await idbPut('plan', ev.target.result); } catch(e) {}
-  };
-  r.readAsDataURL(f);
-  this.value = '';
-};
+// El plano se carga automáticamente de plano.png en el repo (ver loadFixedPlan).
+// Si se quiere cambiar: arrastrar una imagen sobre el mapa.
 
 function applyPlan(src, resetPan) {
   // onload ANTES de src para evitar race condition
@@ -1016,9 +975,6 @@ function bindEvents() {
     await saveToFirebase();
   };
   document.getElementById('btn-export').onclick   = exportJSON;
-  document.getElementById('btn-import').onclick   = () => document.getElementById('file-import-json').click();
-  document.getElementById('file-import-json').onchange = importJSON;
-  document.getElementById('btn-help').onclick  = () => document.getElementById('help-modal').classList.add('open');
 
   // Paneles deslizantes (mobile)
   document.getElementById('btn-toggle-left').onclick  = () => togglePanel('left');
@@ -1716,22 +1672,6 @@ function exportJSON() {
   a.click();
 }
 
-function importJSON() {
-  const f = this.files[0]; if (!f) return;
-  const r = new FileReader();
-  r.onload = ev => {
-    try {
-      const d = JSON.parse(ev.target.result);
-      if (!confirm('¿Importar? Esto reemplazará los equipos y cables actuales.')) return;
-      S.devices = d.devices || [];
-      S.cables  = d.cables  || [];
-      S.seq     = d.seq     || 1;
-      render(); saveStorage();
-    } catch { alert('Archivo JSON inválido.'); }
-  };
-  r.readAsText(f);
-  this.value = '';
-}
 
 // ── MISC ─────────────────────────────────────────────────
 function esc(s) {
@@ -1745,7 +1685,6 @@ function flashBtn(id, label) {
   setTimeout(() => btn.textContent = orig, 1600);
 }
 
-function closeHelp() { document.getElementById('help-modal').classList.remove('open'); }
 
 // Autosave on close
 window.addEventListener('beforeunload', saveStorage);
