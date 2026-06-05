@@ -662,7 +662,9 @@ async function idbGet(key) {
   });
 }
 
-// ── FIREBASE SYNC ─────────────────────────────────────────
+// ── FIREBASE ──────────────────────────────────────────────
+// Lógica simple: Guardar sube el JSON, cargar la página lo baja.
+// Sin listeners, sin real-time, sin complejidad.
 const FB_CONFIG = {
   apiKey:            'AIzaSyDNI1pjJ8JYE5w-0KuNDjKLfKvpWIgeZxQ',
   authDomain:        'mapeors.firebaseapp.com',
@@ -671,13 +673,9 @@ const FB_CONFIG = {
   messagingSenderId: '1047729878285',
   appId:             '1:1047729878285:web:752933c277087f5bbb6c44'
 };
-const PLAN_IMG = 'plano.png'; // plano fijo del repo (opcional)
+const PLAN_IMG = 'plano.png';
 
-let fbDB       = null;
-let _fbUnsub   = null;
-let _saveTimer = null;
-let _lastEdit  = 0;   // timestamp del último cambio local
-
+let fbDB = null;
 const FB_REF = () => fbDB.collection('maps').doc('shared');
 
 function initFirebase() {
@@ -685,84 +683,81 @@ function initFirebase() {
     firebase.initializeApp(FB_CONFIG);
     fbDB = firebase.firestore();
   } catch(e) {
-    setSyncStatus('error', 'Init falló: ' + e.message);
-    return;
+    setSyncStatus('error', 'Firebase: ' + e.message);
   }
-  subscribeFB();
 }
 
-let _connectTimeout = null;
-
-function subscribeFB() {
-  if (_fbUnsub) _fbUnsub();
-  setSyncStatus('connecting');
-
-  // Si no hay respuesta en 8 s, mostramos el error
-  clearTimeout(_connectTimeout);
-  _connectTimeout = setTimeout(() => {
-    setSyncStatus('error', 'Sin respuesta — verificá las Rules en Firebase Console');
-  }, 8000);
-
-  _fbUnsub = FB_REF().onSnapshot(snap => {
-    clearTimeout(_connectTimeout);
-    setSyncStatus('ok');
-    if (!snap.exists) return;
-
-    const d = snap.data();
-    if (!Array.isArray(d?.devices)) return;
-    if (Date.now() - _lastEdit < 3000) return; // no pisar cambios locales recientes
-
-    S.devices = d.devices;
-    S.cables  = d.cables || [];
-    S.areas   = d.areas  || [];
-    S.seq     = d.seq    || 1;
-    render(); _saveLocal();
-  }, err => {
-    clearTimeout(_connectTimeout);
-    const msg = err.code === 'permission-denied'
-      ? '🔒 Permiso denegado — ponete las Rules en Firestore'
-      : '❌ ' + (err.code || err.message);
+// Sube todo como un JSON a Firestore
+async function saveToFirebase() {
+  if (!fbDB) { setSyncStatus('error', 'Firebase no disponible'); return false; }
+  setSyncStatus('saving');
+  try {
+    await FB_REF().set({
+      devices: S.devices,
+      cables:  S.cables,
+      areas:   S.areas,
+      seq:     S.seq,
+      savedAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    const ts = new Date().toLocaleTimeString('es-AR', { hour:'2-digit', minute:'2-digit' });
+    setSyncStatus('ok', `Guardado ✓ ${ts}`);
+    return true;
+  } catch(e) {
+    const msg = e.code === 'permission-denied'
+      ? '🔒 Sin permisos — ponete las Rules en Firebase Console'
+      : '❌ ' + (e.code || e.message);
     setSyncStatus('error', msg);
-  });
+    return false;
+  }
+}
+
+// Baja el JSON de Firestore y lo aplica
+async function loadFromFirebase() {
+  if (!fbDB) return;
+  setSyncStatus('loading');
+  try {
+    const snap = await FB_REF().get();
+    if (!snap.exists) {
+      setSyncStatus('ok', 'Sin datos guardados aún');
+      return;
+    }
+    const d = snap.data();
+    S.devices = Array.isArray(d.devices) ? d.devices : [];
+    S.cables  = Array.isArray(d.cables)  ? d.cables  : [];
+    S.areas   = Array.isArray(d.areas)   ? d.areas   : [];
+    S.seq     = d.seq || 1;
+    _saveLocal();
+    render();
+    const ts = d.savedAt?.toDate?.().toLocaleString('es-AR') || '';
+    setSyncStatus('ok', ts ? `Cargado ✓ ${ts}` : 'Cargado ✓');
+  } catch(e) {
+    const msg = e.code === 'permission-denied'
+      ? '🔒 Sin permisos — ponete las Rules en Firebase Console'
+      : '❌ ' + (e.code || e.message);
+    setSyncStatus('error', msg);
+  }
 }
 
 function setSyncStatus(s, customMsg) {
   const dot   = document.getElementById('sync-dot');
   const label = document.getElementById('sync-label');
-  if (dot) dot.className = s;
-  const txt = { ok:'Sincronizado ✓', saving:'Guardando…', connecting:'Conectando…' };
+  const cls   = { ok:'ok', saving:'saving', loading:'saving', error:'error' };
+  if (dot) dot.className = cls[s] || 'ok';
+  const txt   = { saving:'Guardando…', loading:'Cargando…', ok:'Listo' };
   if (label) label.textContent = customMsg || txt[s] || s;
 }
 
-async function saveToFirebase() {
-  if (!fbDB) { setSyncStatus('error', 'Firebase no iniciado'); return; }
-  setSyncStatus('saving');
-  try {
-    await FB_REF().set({
-      devices:   S.devices,
-      cables:    S.cables,
-      areas:     S.areas,
-      seq:       S.seq,
-      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-    });
-    setSyncStatus('ok');
-  } catch(e) {
-    const msg = e.code === 'permission-denied'
-      ? '🔒 Permiso denegado — revisá las Rules'
-      : '❌ ' + (e.code || e.message);
-    setSyncStatus('error', msg);
-  }
-}
 // ── BOOT ──────────────────────────────────────────────────
 (async function boot() {
   buildTypeSelect();
   buildLegend();
-  loadStorage();
+  loadStorage();       // carga local inmediata como fallback
   bindEvents();
   initFirebase();
   render();
-  // Cargar plano: primero intenta plano.png del repo, si no existe usa IndexedDB
   loadFixedPlan();
+  await loadFromFirebase(); // baja los datos de Firebase (puede tardar un segundo)
+  render();
 })();
 
 async function loadFixedPlan() {
@@ -789,11 +784,9 @@ async function loadFixedPlan() {
 }
 
 // ── STORAGE ───────────────────────────────────────────────
+// Solo guarda localmente. Firebase se actualiza cuando el usuario presiona Guardar.
 function saveStorage() {
-  _lastEdit = Date.now();          // marca el tiempo del cambio local
   _saveLocal();
-  clearTimeout(_saveTimer);
-  _saveTimer = setTimeout(saveToFirebase, 1500); // debounce → guarda en Firebase
 }
 
 function _saveLocal() {
@@ -1012,7 +1005,10 @@ function bindEvents() {
   document.getElementById('btn-add-dev').onclick   = () => setMode('add');
   document.getElementById('btn-add-cab').onclick   = () => setMode('cable');
   document.getElementById('btn-add-area').onclick  = () => setMode('area');
-  document.getElementById('btn-save').onclick     = () => { saveStorage(); flashBtn('btn-save', '✅ Guardado'); };
+  document.getElementById('btn-save').onclick     = async () => {
+    _saveLocal();
+    await saveToFirebase();
+  };
   document.getElementById('btn-export').onclick   = exportJSON;
   document.getElementById('btn-import').onclick   = () => document.getElementById('file-import-json').click();
   document.getElementById('file-import-json').onchange = importJSON;
